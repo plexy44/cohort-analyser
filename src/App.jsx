@@ -28,28 +28,33 @@ const GlassCard = ({ children, className = "", title, icon: Icon, value, trend, 
       <div className="absolute inset-0 bg-gradient-to-br from-cyan-500/10 to-transparent pointer-events-none" />
     )}
     
-    <div className={`relative z-10 flex-1 flex flex-col ${noPadding ? 'p-0' : 'p-6'}`}>
+    <div className={`relative z-10 flex-1 flex flex-col ${noPadding ? 'p-0' : 'p-5'}`}>
       {(title || value) && (
-        <div className={noPadding ? 'p-6 pb-0' : ''}>
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center space-x-2 text-slate-400">
-              {Icon && <Icon size={18} className={isActive ? "text-cyan-300" : "text-cyan-400"} />}
-              <span className={`text-xs font-bold tracking-widest uppercase ${isActive ? 'text-cyan-100' : ''}`}>{title}</span>
+        <div className={`flex flex-col flex-1 ${noPadding ? 'p-5 pb-0' : ''}`}>
+          <div className={`flex items-start justify-between ${trend ? 'mb-2' : 'mb-4'}`}>
+            <div className="flex items-start space-x-2.5 text-slate-400">
+              {Icon && <Icon size={16} className={`mt-0.5 shrink-0 ${isActive ? "text-cyan-300" : "text-cyan-400"}`} />}
+              <span className={`text-[10px] font-bold tracking-[0.15em] uppercase leading-[1.4] ${value !== undefined ? 'w-min whitespace-normal' : ''} ${isActive ? 'text-cyan-100' : ''}`}>
+                {title}
+              </span>
             </div>
-            {trend && (
-              <div className={`flex items-center text-xs font-bold px-2 py-1 rounded-full ${trend === 'up' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'}`}>
-                {trend === 'up' ? <ArrowUpRight size={14} className="mr-1" /> : <ArrowDownRight size={14} className="mr-1" />}
-                {trendValue}
-              </div>
-            )}
           </div>
           
-          {value !== undefined && (
-            <div className="text-3xl font-bold text-white tracking-tight mb-1">
-              {value === null ? '--' : value}
+          {trend && (
+            <div className={`inline-flex items-center w-max text-[10px] font-bold px-2 py-1 mb-2 rounded-md ${trend === 'up' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'}`}>
+              {trend === 'up' ? <ArrowUpRight size={12} className="mr-1" /> : <ArrowDownRight size={12} className="mr-1" />}
+              {trendValue}
             </div>
           )}
-          {subtext && <div className="text-xs text-slate-500 font-medium">{subtext}</div>}
+          
+          <div className="mt-auto pt-2">
+            {value !== undefined && (
+              <div className="text-[32px] leading-none font-bold text-white tracking-tight mb-2">
+                {value === null ? '--' : value}
+              </div>
+            )}
+            {subtext && <div className="text-[11px] text-slate-500 font-medium leading-tight">{subtext}</div>}
+          </div>
         </div>
       )}
       {children}
@@ -67,16 +72,30 @@ const CustomTooltip = ({ active, payload, label }) => {
             let displayValue = entry.value;
             if (typeof displayValue === 'number') {
                 displayValue = Number.isFinite(displayValue) 
-                ? (displayValue % 1 !== 0 ? displayValue.toFixed(2) : displayValue.toLocaleString()) 
+                ? (displayValue % 1 !== 0 ? (displayValue < 0.1 ? displayValue.toFixed(4) : displayValue.toFixed(2)) : displayValue.toLocaleString()) 
                 : '0';
             }
+            
+            // Extract percentage growth if explicitly provided (used in Incremental chart)
+            const growthKey = `${entry.name}_growth`;
+            const growthValRaw = entry.payload && entry.payload[growthKey];
+            const hasGrowth = growthValRaw !== undefined && label !== 0 && label !== '0';
+            const growthNum = hasGrowth ? parseFloat(growthValRaw) : 0;
+
             return (
                 <div key={index} className="flex items-center justify-between gap-4 text-xs">
                     <div className="flex items-center gap-2">
                         <div className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }}></div>
                         <span className="text-slate-300 capitalize">{entry.name}:</span>
                     </div>
-                    <span className="text-white font-mono font-semibold">{displayValue}</span>
+                    <div className="text-right">
+                        <span className="text-white font-mono font-semibold">{displayValue}</span>
+                        {hasGrowth && (
+                            <span className={`ml-2 text-[10px] font-medium ${growthNum > 0 ? 'text-emerald-400' : growthNum < 0 ? 'text-rose-400' : 'text-slate-400'}`}>
+                                {growthNum > 0 ? '+' : ''}{growthValRaw}%
+                            </span>
+                        )}
+                    </div>
                 </div>
             );
             })}
@@ -284,12 +303,24 @@ const DataIngestion = ({ onDataProcessed, existingData }) => {
 
 // --- MODULE 2: COHORT EXPLORER ---
 
+const CHART_COLORS = [
+  '#FF3366', '#FF9933', '#FFCC00', '#99CC33', '#33CC66', 
+  '#33CC99', '#33CCCC', '#3399FF', '#3366FF', '#6633FF', 
+  '#9933FF', '#CC33FF', '#FF33CC', '#FF3399', '#FF6666', 
+  '#FFB366', '#FFE666', '#B3E666', '#66E699', '#66E6E6', 
+  '#66B3FF', '#8080FF', '#B366FF', '#E666FF', '#FF66E6', 
+  '#CC0000', '#CC6600', '#999900', '#339900', '#009933'
+];
+const getColor = (idx) => CHART_COLORS[idx % CHART_COLORS.length];
+
 const CohortExplorer = ({ csvData }) => {
   const [rawData, setRawData] = useState([]);
   const [selectedPath, setSelectedPath] = useState('/');
   const [pathOptions, setPathOptions] = useState([]);
   const [chartMode, setChartMode] = useState('area'); 
   const [gridMode, setGridMode] = useState('cumulative'); 
+  const [isPerUser, setIsPerUser] = useState(false);
+  const [isLogScale, setIsLogScale] = useState(false);
   const [pivotData, setPivotData] = useState([]);
   const [chartData, setChartData] = useState([]);
   const [incrementalData, setIncrementalData] = useState([]);
@@ -382,9 +413,15 @@ const CohortExplorer = ({ csvData }) => {
         
         tableData.forEach(cohort => {
             if (cohort.dataPoints[i]) {
+                 // Cumulative data mapping
                  cPoint[cohort.formattedName] = cohort.dataPoints[i].cumulative;
+                 cPoint[`${cohort.formattedName}_perUser`] = cohort.visitors > 0 ? cohort.dataPoints[i].cumulative / cohort.visitors : 0;
+                 cPoint[`${cohort.formattedName}_growth`] = cohort.dataPoints[i].growthPct;
+                 
+                 // Incremental data mapping
                  const val = i === 0 ? cohort.dataPoints[i].cumulative : cohort.dataPoints[i].diff;
                  iPoint[cohort.formattedName] = val;
+                 iPoint[`${cohort.formattedName}_logSafe`] = val > 0 ? val : undefined; // Prevent log scale crash on 0
                  iPoint[`${cohort.formattedName}_growth`] = cohort.dataPoints[i].growthPct;
             }
         });
@@ -446,33 +483,53 @@ const CohortExplorer = ({ csvData }) => {
                     <TrendingUp size={16} /> Cumulative
                  </button>
                  <button 
-                    onClick={() => setChartMode('bar')}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${chartMode === 'bar' ? 'bg-cyan-500/20 text-cyan-400 shadow-sm' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}
+                    onClick={() => setChartMode('line')}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${chartMode === 'line' ? 'bg-cyan-500/20 text-cyan-400 shadow-sm' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}
                  >
-                    <BarChart2 size={16} /> Incremental
+                    <Activity size={16} /> Incremental
                  </button>
               </div>
         </div>
 
         <GlassCard className="h-[500px]" title={chartMode === 'area' ? 'Cumulative LTV Curve' : 'Incremental Growth (New Purchases)'}>
+            <div className="absolute top-5 right-5 z-20">
+               {chartMode === 'area' && (
+                  <div className="flex bg-[#0e0e12] p-1 rounded-lg border border-white/10 text-xs shadow-lg">
+                      <button onClick={() => setIsPerUser(false)} className={`px-3 py-1.5 rounded transition-all font-semibold ${!isPerUser ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-400 hover:text-slate-200'}`}>Absolute</button>
+                      <button onClick={() => setIsPerUser(true)} className={`px-3 py-1.5 rounded transition-all font-semibold ${isPerUser ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-400 hover:text-slate-200'}`}>Per User</button>
+                  </div>
+               )}
+               {chartMode === 'line' && (
+                  <div className="flex bg-[#0e0e12] p-1 rounded-lg border border-white/10 text-xs shadow-lg">
+                      <button onClick={() => setIsLogScale(false)} className={`px-3 py-1.5 rounded transition-all font-semibold ${!isLogScale ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-400 hover:text-slate-200'}`}>Linear</button>
+                      <button onClick={() => setIsLogScale(true)} className={`px-3 py-1.5 rounded transition-all font-semibold ${isLogScale ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-400 hover:text-slate-200'}`}>Logarithmic</button>
+                  </div>
+               )}
+            </div>
+            
             <ResponsiveContainer width="100%" height="100%">
                 {chartMode === 'area' ? (
-                    <AreaChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                    <AreaChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 20 }}>
                             <defs>
                             {pivotData.map((cohort, idx) => (
                                 <linearGradient key={`grad-${idx}`} id={`grad-${idx}`} x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="5%" stopColor={`hsl(${idx * 40}, 70%, 50%)`} stopOpacity={0.3}/>
-                                    <stop offset="95%" stopColor={`hsl(${idx * 40}, 70%, 50%)`} stopOpacity={0}/>
+                                    <stop offset="5%" stopColor={getColor(idx)} stopOpacity={0.3}/>
+                                    <stop offset="95%" stopColor={getColor(idx)} stopOpacity={0}/>
                                 </linearGradient>
                             ))}
                             </defs>
                             <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                            <XAxis dataKey="index" stroke="#64748b" tick={{ fill: '#94a3b8' }} label={{ value: 'Months Since', position: 'insideBottom', offset: -5, fill: '#64748b' }} />
-                            <YAxis stroke="#64748b" tick={{ fill: '#94a3b8' }} />
+                            <XAxis 
+                                dataKey="index" 
+                                stroke="#64748b" 
+                                tick={{ fill: '#94a3b8' }} 
+                                label={{ value: 'MONTHS SINCE', position: 'insideBottom', offset: -15, fill: '#64748b', fontSize: 10, fontWeight: 'bold', letterSpacing: '0.15em' }} 
+                            />
+                            <YAxis stroke="#64748b" tick={{ fill: '#94a3b8' }} tickFormatter={(val) => isPerUser ? val.toFixed(2) : val} />
                             <Tooltip content={<CustomTooltip />} />
                             <Legend 
                                 content={(props) => (
-                                    <div className="flex flex-wrap gap-2 justify-center mt-4 px-4 max-h-24 overflow-y-auto custom-scrollbar">
+                                    <div className="flex flex-wrap gap-2 justify-center mt-6 px-4 max-h-24 overflow-y-auto custom-scrollbar">
                                         {props.payload.map((entry, index) => {
                                             const isHidden = hiddenSeries.has(entry.value);
                                             return (
@@ -490,8 +547,9 @@ const CohortExplorer = ({ csvData }) => {
                                 key={cohort.formattedName}
                                 hide={hiddenSeries.has(cohort.formattedName)}
                                 type="monotone" 
-                                dataKey={cohort.formattedName} 
-                                stroke={`hsl(${idx * 40}, 70%, 50%)`}
+                                dataKey={isPerUser ? `${cohort.formattedName}_perUser` : cohort.formattedName} 
+                                name={cohort.formattedName}
+                                stroke={getColor(idx)}
                                 fill={`url(#grad-${idx})`}
                                 strokeWidth={2}
                                 activeDot={{ r: 6 }}
@@ -499,22 +557,51 @@ const CohortExplorer = ({ csvData }) => {
                             ))}
                     </AreaChart>
                 ) : (
-                    <BarChart data={incrementalData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                    <LineChart data={incrementalData} margin={{ top: 10, right: 10, left: 0, bottom: 20 }}>
                             <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                            <XAxis dataKey="index" stroke="#64748b" tick={{ fill: '#94a3b8' }} />
-                            <YAxis stroke="#64748b" tick={{ fill: '#94a3b8' }} />
-                            <Tooltip content={<CustomTooltip />} cursor={{fill: 'transparent'}} />
+                            <XAxis 
+                                dataKey="index" 
+                                stroke="#64748b" 
+                                tick={{ fill: '#94a3b8' }} 
+                                label={{ value: 'MONTHS SINCE', position: 'insideBottom', offset: -15, fill: '#64748b', fontSize: 10, fontWeight: 'bold', letterSpacing: '0.15em' }} 
+                            />
+                            <YAxis 
+                                stroke="#64748b" 
+                                tick={{ fill: '#94a3b8' }} 
+                                scale={isLogScale ? 'log' : 'auto'} 
+                                domain={isLogScale ? [1, 'auto'] : [0, 'auto']} 
+                                allowDataOverflow={isLogScale}
+                            />
+                            <Tooltip content={<CustomTooltip />} />
+                            <Legend 
+                                content={(props) => (
+                                    <div className="flex flex-wrap gap-2 justify-center mt-6 px-4 max-h-24 overflow-y-auto custom-scrollbar">
+                                        {props.payload.map((entry, index) => {
+                                            const isHidden = hiddenSeries.has(entry.value);
+                                            return (
+                                                <button key={index} onClick={() => toggleSeries(entry.value)} className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-all border ${isHidden ? 'bg-transparent text-slate-600 border-slate-700' : 'bg-white/5 text-slate-200 border-white/10'}`}>
+                                                    <span className={`w-2 h-2 rounded-full ${isHidden ? 'bg-slate-600' : ''}`} style={{ backgroundColor: isHidden ? undefined : entry.color }} />
+                                                    {entry.value}
+                                                </button>
+                                            )
+                                        })}
+                                    </div>
+                                )}
+                            />
                             {pivotData.map((cohort, idx) => (
-                                <Bar 
-                                key={cohort.formattedName}
-                                hide={hiddenSeries.has(cohort.formattedName)}
-                                dataKey={cohort.formattedName} 
-                                fill={`hsl(${idx * 40}, 70%, 50%)`}
-                                radius={[4, 4, 0, 0]}
-                                fillOpacity={0.8}
+                                <Line 
+                                    key={cohort.formattedName}
+                                    hide={hiddenSeries.has(cohort.formattedName)}
+                                    type="monotone"
+                                    dataKey={isLogScale ? `${cohort.formattedName}_logSafe` : cohort.formattedName} 
+                                    name={cohort.formattedName}
+                                    stroke={getColor(idx)}
+                                    strokeWidth={2}
+                                    dot={{ r: 3, strokeWidth: 0, fill: getColor(idx) }}
+                                    activeDot={{ r: 6 }}
                                 />
                             ))}
-                    </BarChart>
+                    </LineChart>
                 )}
             </ResponsiveContainer>
         </GlassCard>
@@ -745,67 +832,63 @@ const VelocityExplorer = ({ csvData }) => {
                     <GlassCard title="Avg Conversion" icon={Percent} value={avgConv + '%'} subtext="Global Average" />
                 </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    {/* Monthly Cohort Performance Table */}
-                    <div className="lg:col-span-2">
-                        <GlassCard title="Monthly Cohort Performance" noPadding className="h-full overflow-hidden">
-                             <div className="p-6 pb-2">
-                                <div className="grid grid-cols-5 text-xs font-bold text-slate-500 uppercase tracking-wider mb-4 border-b border-white/10 pb-4">
-                                    <div className="col-span-1">Month</div>
-                                    <div className="text-right">Visitors</div>
-                                    <div className="text-right">Purchases</div>
-                                    <div className="text-right">Conv. Rate</div>
-                                    <div className="text-right">Velocity (P/D)</div>
-                                </div>
-                             </div>
-                             <div className="overflow-y-auto max-h-[400px] custom-scrollbar px-6 pb-6">
-                                {overallData.slice().reverse().map((row, i) => (
-                                    <div key={row.month} className="grid grid-cols-5 py-4 border-b border-white/5 items-center hover:bg-white/5 transition-colors -mx-2 px-2 rounded-lg">
-                                        <div className="font-mono text-slate-300 text-sm flex items-center gap-2">
-                                            <div className="w-1 h-8 rounded-full bg-slate-700"></div>
-                                            {row.month}
-                                        </div>
-                                        <div className="text-right">
-                                            <span className="inline-block px-2 py-1 bg-indigo-500/20 text-indigo-300 rounded text-sm font-bold min-w-[60px]">{row.visitors.toLocaleString()}</span>
-                                        </div>
-                                        <div className="text-right">
-                                            <span className="inline-block px-2 py-1 bg-cyan-500/20 text-cyan-300 rounded text-sm font-bold min-w-[60px]">{row.purchases.toLocaleString()}</span>
-                                        </div>
-                                        <div className="text-right">
-                                            <span className="inline-block px-2 py-1 bg-emerald-500/10 text-emerald-400 rounded text-sm font-bold">{row.conversion}%</span>
-                                        </div>
-                                        <div className="text-right text-slate-400 font-mono text-sm">{row.velocity}</div>
-                                    </div>
-                                ))}
-                             </div>
-                        </GlassCard>
+                {/* Velocity vs Traffic Chart - Moved horizontally between cards and table */}
+                <GlassCard title="Purchase Velocity vs Traffic" icon={Filter} className="h-[400px]">
+                    <div className="h-full w-full pt-4">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <ComposedChart data={overallData}>
+                                <defs>
+                                    <linearGradient id="gradPurchases" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.5}/>
+                                        <stop offset="95%" stopColor="#06b6d4" stopOpacity={0}/>
+                                    </linearGradient>
+                                </defs>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" vertical={false} />
+                                <XAxis dataKey="month" stroke="#64748b" tick={{fontSize:10}} axisLine={false} tickLine={false} />
+                                <YAxis yAxisId="left" stroke="#8b5cf6" tick={{fontSize:10}} axisLine={false} tickLine={false} tickFormatter={(val) => (val/1000).toFixed(0)+'k'} />
+                                <YAxis yAxisId="right" orientation="right" stroke="#06b6d4" tick={{fontSize:10}} axisLine={false} tickLine={false} />
+                                <Tooltip content={CustomTooltip} />
+                                <Legend wrapperStyle={{fontSize: '12px', paddingTop: '10px'}} />
+                                <Area yAxisId="left" type="monotone" dataKey="visitors" name="Traffic" stroke="#8b5cf6" fill="#8b5cf6" fillOpacity={0.1} strokeWidth={2} />
+                                <Line yAxisId="right" type="monotone" dataKey="purchases" name="Purchases" stroke="#22d3ee" strokeWidth={3} dot={{r:0}} activeDot={{r:6}} />
+                                <ReferenceLine yAxisId="right" y={parseFloat(latest.velocity) * 30} stroke="#94a3b8" strokeDasharray="3 3" />
+                            </ComposedChart>
+                        </ResponsiveContainer>
                     </div>
+                </GlassCard>
 
-                    {/* Velocity vs Traffic Chart */}
-                    <GlassCard title="Purchase Velocity vs Traffic" icon={Filter} className="h-[500px]">
-                        <div className="h-full w-full pt-4">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <ComposedChart data={overallData}>
-                                    <defs>
-                                        <linearGradient id="gradPurchases" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.5}/>
-                                            <stop offset="95%" stopColor="#06b6d4" stopOpacity={0}/>
-                                        </linearGradient>
-                                    </defs>
-                                    <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" vertical={false} />
-                                    <XAxis dataKey="month" stroke="#64748b" tick={{fontSize:10}} axisLine={false} tickLine={false} />
-                                    <YAxis yAxisId="left" stroke="#8b5cf6" tick={{fontSize:10}} axisLine={false} tickLine={false} tickFormatter={(val) => (val/1000).toFixed(0)+'k'} />
-                                    <YAxis yAxisId="right" orientation="right" stroke="#06b6d4" tick={{fontSize:10}} axisLine={false} tickLine={false} />
-                                    <Tooltip content={CustomTooltip} />
-                                    <Legend wrapperStyle={{fontSize: '12px', paddingTop: '10px'}} />
-                                    <Area yAxisId="left" type="monotone" dataKey="visitors" name="Traffic" stroke="#8b5cf6" fill="#8b5cf6" fillOpacity={0.1} strokeWidth={2} />
-                                    <Line yAxisId="right" type="monotone" dataKey="purchases" name="Purchases" stroke="#22d3ee" strokeWidth={3} dot={{r:0}} activeDot={{r:6}} />
-                                    <ReferenceLine yAxisId="right" y={parseFloat(latest.velocity) * 30} stroke="#94a3b8" strokeDasharray="3 3" />
-                                </ComposedChart>
-                            </ResponsiveContainer>
+                {/* Monthly Cohort Performance Table */}
+                <GlassCard title="Monthly Cohort Performance" noPadding className="overflow-hidden">
+                     <div className="p-6 pb-2">
+                        <div className="grid grid-cols-5 text-xs font-bold text-slate-500 uppercase tracking-wider mb-4 border-b border-white/10 pb-4">
+                            <div className="col-span-1">Month</div>
+                            <div className="text-right">Visitors</div>
+                            <div className="text-right">Purchases</div>
+                            <div className="text-right">Conv. Rate</div>
+                            <div className="text-right">Velocity (P/D)</div>
                         </div>
-                    </GlassCard>
-                </div>
+                     </div>
+                     <div className="overflow-y-auto max-h-[400px] custom-scrollbar px-6 pb-6">
+                        {overallData.slice().reverse().map((row, i) => (
+                            <div key={row.month} className="grid grid-cols-5 py-4 border-b border-white/5 items-center hover:bg-white/5 transition-colors -mx-2 px-2 rounded-lg">
+                                <div className="font-mono text-slate-300 text-sm flex items-center gap-2">
+                                    <div className="w-1 h-8 rounded-full bg-slate-700"></div>
+                                    {row.month}
+                                </div>
+                                <div className="text-right">
+                                    <span className="inline-block px-2 py-1 bg-indigo-500/20 text-indigo-300 rounded text-sm font-bold min-w-[60px]">{row.visitors.toLocaleString()}</span>
+                                </div>
+                                <div className="text-right">
+                                    <span className="inline-block px-2 py-1 bg-cyan-500/20 text-cyan-300 rounded text-sm font-bold min-w-[60px]">{row.purchases.toLocaleString()}</span>
+                                </div>
+                                <div className="text-right">
+                                    <span className="inline-block px-2 py-1 bg-emerald-500/10 text-emerald-400 rounded text-sm font-bold">{row.conversion}%</span>
+                                </div>
+                                <div className="text-right text-slate-400 font-mono text-sm">{row.velocity}</div>
+                            </div>
+                        ))}
+                     </div>
+                </GlassCard>
             </div>
          ) : (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in zoom-in duration-300">
@@ -1019,8 +1102,8 @@ const App = () => {
                  {activeTab === 'velocity' && 'Velocity & Paths'}
              </h2>
              <p className="text-slate-400 text-sm">
-                 {activeTab === 'etl' && 'Clean, standardize, and prepare your raw GA4 export.'}
-                 {activeTab === 'cohort' && 'Analyze cumulative growth and retention heatmaps.'}
+                 {activeTab === 'etl' && 'Clean, standardise, and prepare your raw GA4 export.'}
+                 {activeTab === 'cohort' && 'Analyse cumulative growth and retention heatmaps.'}
                  {activeTab === 'velocity' && 'Understand purchase speed and top converting pages.'}
              </p>
           </header>
