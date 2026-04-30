@@ -4,7 +4,25 @@ A powerful, client-side analytics dashboard designed to visualize and analyze **
 
 Built with **React**, **Vite**, and **Tailwind CSS**, this tool processes raw CSV exports locally in your browser to generate interactive LTV curves, retention heatmaps, and purchase velocity trends without sending data to any server.
 
-![App Screenshot](https://images.unsplash.com/photo-1551288049-bebda4e38f71?q=80&w=2670&auto=format&fit=crop) 
+## Live App
+
+
+https://cohortsuite.netlify.app/
+
+
+## App Screenshots
+
+<img width="2198" height="1043" alt="Image" src="https://github.com/user-attachments/assets/c4e1040c-d546-4851-88f3-bf1109bceec9" />
+
+### 
+
+<img width="2199" height="1041" alt="Image" src="https://github.com/user-attachments/assets/0266d85b-f765-4783-a0b5-458deb337add" />
+
+### 
+
+<img width="2205" height="973" alt="Image" src="https://github.com/user-attachments/assets/1cb06129-7678-4b11-886a-e4187f288af9" />
+
+### 
 
 ## 🚀 Features
 
