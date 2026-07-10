@@ -2,7 +2,246 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ============================================================
+   COHORTSUITE — LIQUID GLASS / IRIDESCENT CYAN SYSTEM
+   Tokens first; every colour below derives from these.
+   ============================================================ */
+:root {
+  --void: #030407;          /* page background — blue-cast near-black */
+  --abyss-hi: rgba(17, 24, 38, 0.82);  /* glass top */
+  --abyss-lo: rgba(7, 10, 17, 0.62);   /* glass bottom */
+  --cyan: #22d3ee;          /* working accent — text, actives, strokes */
+  --electric: #7df9ff;      /* highlight — specular, peaks */
+  --violet: #8b5cf6;        /* iridescent partner — borders/glows only */
+  --magenta: #e879f9;       /* iridescent partner — borders/glows only */
+  --mint: #34d399;          /* positive delta */
+  --rose: #fb7185;          /* negative delta */
+  --ink: #dbe4ee;
+  --ink-dim: #8b98ab;
+}
+
+/* Rotating angle for the liquid border (animatable custom property) */
+@property --lg-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+
+html { scrollbar-color: rgba(125, 249, 255, 0.15) transparent; }
+
 body {
-  background-color: #050505;
-  color: #e2e8f0;
+  background-color: var(--void);
+  color: var(--ink);
+  font-feature-settings: 'ss01' on, 'ss02' on;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ============================================================
+   AMBIENT LAYER — aurora blobs, cyber grid, film grain
+   ============================================================ */
+.aurora-blob {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(110px);
+  mix-blend-mode: screen;
+  will-change: transform;
+  pointer-events: none;
+}
+.aurora-a {
+  width: 55vw; height: 55vw; top: -22vw; left: -12vw;
+  background: radial-gradient(circle at 30% 30%, rgba(34, 211, 238, 0.14), transparent 65%);
+  animation: aurora-drift-a 32s ease-in-out infinite alternate;
+}
+.aurora-b {
+  width: 48vw; height: 48vw; bottom: -20vw; right: -10vw;
+  background: radial-gradient(circle at 60% 60%, rgba(139, 92, 246, 0.12), transparent 65%);
+  animation: aurora-drift-b 38s ease-in-out infinite alternate;
+}
+.aurora-c {
+  width: 34vw; height: 34vw; top: 32%; left: 46%;
+  background: radial-gradient(circle at 50% 50%, rgba(232, 121, 249, 0.07), transparent 70%);
+  animation: aurora-drift-c 44s ease-in-out infinite alternate;
+}
+@keyframes aurora-drift-a { to { transform: translate(9vw, 7vh) scale(1.12); } }
+@keyframes aurora-drift-b { to { transform: translate(-8vw, -6vh) scale(1.08); } }
+@keyframes aurora-drift-c { to { transform: translate(-6vw, 8vh) scale(0.92); } }
+
+.cyber-grid {
+  position: absolute; inset: 0;
+  background-image:
+    linear-gradient(rgba(34, 211, 238, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(34, 211, 238, 0.045) 1px, transparent 1px);
+  background-size: 44px 44px;
+  -webkit-mask-image: radial-gradient(70% 55% at 50% 0%, black 20%, transparent 78%);
+  mask-image: radial-gradient(70% 55% at 50% 0%, black 20%, transparent 78%);
+  pointer-events: none;
+}
+
+/* Fine grain kills gradient banding and makes the glass read as material */
+.film-grain {
+  position: absolute; inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
+  opacity: 0.035;
+  pointer-events: none;
+}
+
+/* ============================================================
+   SIGNATURE — the liquid glass card
+   Layer order: glass body → ::before iridescent conic border
+   (masked to a 1px ring, slowly rotating) → ::after caustic
+   sheen drifting across the surface.
+   ============================================================ */
+.liquid-glass {
+  position: relative;
+  border-radius: 1.25rem;
+  background: linear-gradient(160deg, var(--abyss-hi), var(--abyss-lo));
+  -webkit-backdrop-filter: blur(22px) saturate(1.45);
+  backdrop-filter: blur(22px) saturate(1.45);
+  box-shadow:
+    0 24px 60px -28px rgba(0, 0, 0, 0.85),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),   /* specular top edge */
+    inset 0 -1px 0 rgba(0, 0, 0, 0.35);
+  transition: box-shadow 0.4s ease, transform 0.4s ease;
+}
+.liquid-glass::before {
+  content: '';
+  position: absolute; inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: conic-gradient(
+    from var(--lg-angle),
+    rgba(34, 211, 238, 0.55),
+    rgba(139, 92, 246, 0.32),
+    rgba(232, 121, 249, 0.26),
+    rgba(52, 211, 153, 0.28),
+    rgba(34, 211, 238, 0.55)
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  opacity: 0.45;
+  animation: lg-rotate 16s linear infinite;
+  transition: opacity 0.45s ease;
+  pointer-events: none;
+}
+.liquid-glass::after {
+  content: '';
+  position: absolute; inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    115deg,
+    transparent 32%,
+    rgba(125, 249, 255, 0.055) 45%,
+    rgba(232, 121, 249, 0.045) 55%,
+    transparent 68%
+  );
+  background-size: 250% 250%;
+  animation: lg-sheen 11s ease-in-out infinite;
+  pointer-events: none;
+}
+.liquid-glass:hover::before { opacity: 0.85; }
+.liquid-glass:hover {
+  box-shadow:
+    0 28px 70px -28px rgba(0, 0, 0, 0.9),
+    0 0 40px -18px rgba(34, 211, 238, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.09),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.35);
+}
+.liquid-glass--active::before { opacity: 1; animation-duration: 8s; }
+.liquid-glass--active {
+  box-shadow:
+    0 28px 70px -28px rgba(0, 0, 0, 0.9),
+    0 0 48px -14px rgba(34, 211, 238, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+/* Quiet variant: no rotating ring (dropzones, dense lists) */
+.liquid-glass--quiet::before { animation: none; opacity: 0.22; }
+.liquid-glass--quiet::after { display: none; }
+
+@keyframes lg-rotate { to { --lg-angle: 360deg; } }
+@keyframes lg-sheen {
+  0%, 100% { background-position: 0% 0%; }
+  50% { background-position: 100% 100%; }
+}
+
+/* Dashed upload target — dashed ring + glass, no conic border */
+.glass-dropzone {
+  border-radius: 1.25rem;
+  background: linear-gradient(160deg, rgba(14, 20, 32, 0.6), rgba(7, 10, 17, 0.45));
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+  border: 2px dashed rgba(125, 249, 255, 0.16);
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+.glass-dropzone:hover {
+  border-color: rgba(34, 211, 238, 0.45);
+  box-shadow: 0 0 50px -20px rgba(34, 211, 238, 0.35);
+}
+
+/* ============================================================
+   DATA TREATMENT
+   ============================================================ */
+.data-num {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+.glow-num {
+  text-shadow: 0 0 22px rgba(34, 211, 238, 0.35), 0 0 3px rgba(125, 249, 255, 0.35);
+}
+.glow-stroke { filter: drop-shadow(0 0 6px rgba(34, 211, 238, 0.4)); }
+.glow-stroke-soft { filter: drop-shadow(0 0 4px rgba(34, 211, 238, 0.22)); }
+
+.shimmer-text {
+  background: linear-gradient(100deg, #f3f7fb 20%, var(--electric) 40%, var(--magenta) 50%, var(--electric) 60%, #f3f7fb 80%);
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer-slide 7s ease-in-out infinite;
+}
+@keyframes shimmer-slide {
+  0%, 100% { background-position: 110% 0; }
+  50% { background-position: -10% 0; }
+}
+
+.eyebrow {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: rgba(34, 211, 238, 0.75);
+}
+
+/* ============================================================
+   CHROME
+   ============================================================ */
+.custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+.custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: linear-gradient(rgba(34, 211, 238, 0.25), rgba(139, 92, 246, 0.25));
+  border-radius: 10px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(34, 211, 238, 0.4); }
+
+:focus-visible {
+  outline: 2px solid rgba(34, 211, 238, 0.7);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+::selection { background: rgba(34, 211, 238, 0.3); color: #eafcff; }
+
+/* ============================================================
+   ACCESSIBILITY — everything static, nothing lost
+   ============================================================ */
+@media (prefers-reduced-motion: reduce) {
+  .aurora-a, .aurora-b, .aurora-c,
+  .liquid-glass::before, .liquid-glass::after,
+  .shimmer-text {
+    animation: none !important;
+  }
+  * { transition-duration: 0.01ms !important; }
 }
