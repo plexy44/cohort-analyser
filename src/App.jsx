@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, createContext, useContext } from 'react';
 import { 
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
   AreaChart, Area, Legend, BarChart, Bar, LineChart, Line, ComposedChart, ReferenceLine, Cell, PieChart, Pie 
@@ -6,8 +6,27 @@ import {
 import { 
   Upload, FileDown, ArrowRight, CheckCircle, AlertCircle, RefreshCw, Database,
   LayoutDashboard, Layers, Zap, TrendingUp, Filter, Eye, EyeOff, BarChart2,
-  Grid, Activity, Users, ShoppingCart, Percent, Map as MapIcon, ChevronRight, Menu, ArrowUpRight, ArrowDownRight, Trash2
+  Grid, Activity, Users, ShoppingCart, Percent, Map as MapIcon, ChevronRight, Menu, ArrowUpRight, ArrowDownRight, Trash2,
+  Sun, Moon, Camera, Copy, Pencil, Plus, X, Trophy, Scale, Flag
 } from 'lucide-react';
+
+// --- THEME SYSTEM ---
+// Two series ramps: the dark iridescent set, and a deeper subdued set that
+// holds contrast on the light paper background.
+export const ThemeContext = createContext('dark');
+const RAMP_DARK = [
+  '#22d3ee', '#a78bfa', '#f472b6', '#34d399', '#7df9ff',
+  '#8b5cf6', '#e879f9', '#5eead4', '#38bdf8', '#c084fc',
+  '#fb7185', '#4ade80', '#67e8f9', '#818cf8', '#f0abfc',
+  '#2dd4bf', '#0ea5e9', '#d8b4fe', '#fda4af', '#86efac'
+];
+const RAMP_LIGHT = [
+  '#0891b2', '#7c3aed', '#db2777', '#059669', '#0e7490',
+  '#6d28d9', '#c026d3', '#0d9488', '#0284c7', '#9333ea',
+  '#e11d48', '#16a34a', '#155e75', '#4f46e5', '#a21caf',
+  '#0f766e', '#0369a1', '#7e22ce', '#be123c', '#15803d'
+];
+const useRamp = () => (useContext(ThemeContext) === 'light' ? RAMP_LIGHT : RAMP_DARK);
 
 // --- SHARED UI COMPONENTS ---
 
@@ -109,9 +128,13 @@ const CustomTooltip = ({ active, payload, label }) => {
       <div className="liquid-glass liquid-glass--quiet p-4 z-50 min-w-[180px]">
         <p className="text-cyan-300 font-bold mb-2 pb-2 text-xs uppercase tracking-[0.2em] border-b border-transparent [border-image:linear-gradient(90deg,rgba(34,211,238,.5),rgba(139,92,246,.35),transparent)_1]">{label}</p>
         <div className="flex flex-col gap-1.5">
-            {payload.map((entry, index) => {
+            {payload.filter(e => e.value !== undefined && e.value !== null).map((entry, index) => {
             let displayValue = entry.value;
-            if (typeof displayValue === 'number') {
+            if (Array.isArray(displayValue)) {
+                // Benchmark / projection bands arrive as [low, high]
+                const fmt = (v) => (v % 1 !== 0 ? (v < 0.1 ? v.toFixed(4) : v.toFixed(2)) : v.toLocaleString());
+                displayValue = `${fmt(displayValue[0])} \u2013 ${fmt(displayValue[1])}`;
+            } else if (typeof displayValue === 'number') {
                 displayValue = Number.isFinite(displayValue) 
                 ? (displayValue % 1 !== 0 ? (displayValue < 0.1 ? displayValue.toFixed(4) : displayValue.toFixed(2)) : displayValue.toLocaleString()) 
                 : '0';
@@ -208,9 +231,11 @@ const readDimensionFromCleanCSV = (csv) => {
 
 // --- MODULE 1: ETL PROCESSOR ---
 
-const DataIngestion = ({ onAdd, datasets, activeId, onSelect, onRemove }) => {
+const DataIngestion = ({ onAdd, datasets, activeId, onSelect, onRemove, onRename }) => {
   const [error, setError] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [draftName, setDraftName] = useState('');
 
   const processData = (text, fileName) => {
     setIsProcessing(true);
@@ -374,11 +399,30 @@ const DataIngestion = ({ onAdd, datasets, activeId, onSelect, onRemove }) => {
                             <CheckCircle size={20} />
                         </div>
                         <div className="flex-1 overflow-hidden text-left">
-                            <div className="font-bold text-white truncate">{ds.name}</div>
+                            {editingId === ds.id ? (
+                                <input
+                                    autoFocus
+                                    value={draftName}
+                                    onClick={(e) => e.stopPropagation()}
+                                    onChange={(e) => setDraftName(e.target.value)}
+                                    onKeyDown={(e) => { if (e.key === 'Enter') { onRename(ds.id, draftName.trim() || ds.name); setEditingId(null); } if (e.key === 'Escape') setEditingId(null); }}
+                                    onBlur={() => { onRename(ds.id, draftName.trim() || ds.name); setEditingId(null); }}
+                                    className="w-full bg-white/5 border border-cyan-500/40 rounded-lg px-2 py-1 text-white font-bold text-sm focus:outline-none"
+                                />
+                            ) : (
+                                <div className="font-bold text-white truncate">{ds.name}</div>
+                            )}
                             <div className="text-[11px] text-slate-500 font-mono truncate">
                                 {ds.stats.dimension} · {ds.stats.valid} rows · {ds.stats.firstDate} → {ds.stats.lastDate}
                             </div>
                         </div>
+                        <button 
+                            onClick={(e) => { e.stopPropagation(); setEditingId(ds.id); setDraftName(ds.name); }}
+                            className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors shrink-0"
+                            title="Rename dataset (tag it, e.g. 'Paths — Meta only')"
+                        >
+                            <Pencil size={14} />
+                        </button>
                         {ds.id === activeId && (
                             <span className="text-[9px] px-2 py-1 rounded bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 uppercase tracking-wider shrink-0">Active</span>
                         )}
@@ -413,67 +457,178 @@ const DataIngestion = ({ onAdd, datasets, activeId, onSelect, onRemove }) => {
 
 // --- MODULE 2: COHORT EXPLORER ---
 
-// Iridescent series ramp — cyans → violets → magentas → mints, tuned for
-// separation on the void background. Hue-adjacent pairs never sit next to
-// each other in cycle order.
-const CHART_COLORS = [
-  '#22d3ee', '#a78bfa', '#f472b6', '#34d399', '#7df9ff',
-  '#8b5cf6', '#e879f9', '#5eead4', '#38bdf8', '#c084fc',
-  '#fb7185', '#4ade80', '#67e8f9', '#818cf8', '#f0abfc',
-  '#2dd4bf', '#0ea5e9', '#d8b4fe', '#fda4af', '#86efac'
-];
-const getColor = (idx) => CHART_COLORS[idx % CHART_COLORS.length];
+// Interpolated quantile of a numeric array
+const quantile = (arr, q) => {
+  const s = [...arr].sort((a, b) => a - b);
+  if (!s.length) return 0;
+  const pos = (s.length - 1) * q;
+  const lo = Math.floor(pos), hi = Math.ceil(pos);
+  return s[lo] + (s[hi] - s[lo]) * (pos - lo);
+};
+
+// Months between two YYYY-MM strings
+const monthDiff = (a, b) => {
+  const [ay, am] = a.split('-').map(Number);
+  const [by, bm] = b.split('-').map(Number);
+  return (by - ay) * 12 + (bm - am);
+};
+
+// Parse a cleaned CohortSuite CSV into row objects (shared by Compare Lab)
+const parseCleanCSV = (csv) => {
+  if (!csv) return [];
+  const lines = csv.split('\n').map(l => l.trim()).filter(l => l);
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    const cols = splitCSVLine(lines[i]);
+    if (cols.length >= 6) {
+      rows.push({
+        monthIndex: parseInt(cols[0]),
+        cohortStart: cols[1],
+        path: cols[3],
+        visitors: safeInt(cols[4]),
+        purchases: safeInt(cols[5])
+      });
+    }
+  }
+  return rows;
+};
+
+// Aggregate per-segment stats: weighted per-user cumulative curve, M0
+// conversion, tail ratio (M3/M0), fragility (CV of M0 conv across cohorts).
+const computeSegmentStats = (rows) => {
+  const segs = {};
+  rows.forEach(r => {
+    if (!segs[r.path]) segs[r.path] = { path: r.path, cohorts: {} };
+    if (!segs[r.path].cohorts[r.cohortStart]) segs[r.path].cohorts[r.cohortStart] = { visitors: r.visitors, pts: {} };
+    segs[r.path].cohorts[r.cohortStart].pts[r.monthIndex] = r.purchases;
+  });
+  return Object.values(segs).map(s => {
+    const cohorts = Object.values(s.cohorts);
+    const visitors = cohorts.reduce((a, c) => a + c.visitors, 0);
+    const maxAge = Math.max(...cohorts.flatMap(c => Object.keys(c.pts).map(Number)), 0);
+    const pu = [];
+    for (let m = 0; m <= maxAge; m++) {
+      let p = 0, v = 0;
+      cohorts.forEach(c => { if (m in c.pts) { p += c.pts[m]; v += c.visitors; } });
+      pu[m] = v > 0 ? p / v : undefined;
+    }
+    let latestPU = 0;
+    for (let m = maxAge; m >= 0; m--) { if (pu[m] !== undefined) { latestPU = pu[m]; break; } }
+    const m0s = cohorts.filter(c => c.visitors > 0 && 0 in c.pts).map(c => (c.pts[0] / c.visitors) * 100);
+    const mean = m0s.reduce((a, b) => a + b, 0) / (m0s.length || 1);
+    const sd = Math.sqrt(m0s.reduce((a, b) => a + (b - mean) ** 2, 0) / (m0s.length || 1));
+    return {
+      path: s.path,
+      label: s.path === 'RESERVED_TOTAL' ? 'All Traffic' : s.path,
+      visitors, maxAge, pu, latestPU,
+      m0Conv: (pu[0] || 0) * 100,
+      tail: (pu[3] !== undefined && pu[0] > 0) ? pu[3] / pu[0] : null,
+      fragility: mean > 0 ? (sd / mean) * 100 : 0,
+      cohortCount: cohorts.length
+    };
+  });
+};
+
+// Export the first SVG inside a container as a 2x PNG. CSS variables are
+// resolved to concrete colors before rasterising (an isolated SVG image has
+// no access to the document's custom properties).
+const exportChartPNG = (el, filename) => {
+  try {
+    const svg = el?.querySelector('svg');
+    if (!svg) return;
+    const { width, height } = svg.getBoundingClientRect();
+    const clone = svg.cloneNode(true);
+    clone.setAttribute('width', width);
+    clone.setAttribute('height', height);
+    const rootStyle = getComputedStyle(document.documentElement);
+    let data = new XMLSerializer().serializeToString(clone);
+    data = data.replace(/var\((--[\w-]+)\)/g, (_, v) => rootStyle.getPropertyValue(v).trim() || '#888');
+    const bg = getComputedStyle(document.body).backgroundColor || '#030407';
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement('canvas');
+      c.width = width * 2; c.height = height * 2;
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = bg;
+      ctx.fillRect(0, 0, c.width, c.height);
+      ctx.drawImage(img, 0, 0, c.width, c.height);
+      c.toBlob(b => {
+        const u = URL.createObjectURL(b);
+        const a = document.createElement('a');
+        a.href = u; a.download = `${filename}.png`; a.click();
+        URL.revokeObjectURL(u);
+      });
+    };
+    img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(data)));
+  } catch (e) { console.error('PNG export failed', e); }
+};
+
+// Small persisted-config hook (AOV, CAC, annotations share this pattern)
+const useStoredConfig = (key, fallback) => {
+  const [cfg, setCfg] = useState(() => {
+    try { const s = localStorage.getItem(key); return s ? JSON.parse(s) : fallback; }
+    catch { return fallback; }
+  });
+  const save = (next) => {
+    setCfg(next);
+    try { localStorage.setItem(key, JSON.stringify(next)); } catch {}
+  };
+  return [cfg, save];
+};
 
 const CohortExplorer = ({ csvData }) => {
+  const ramp = useRamp();
+  const getColor = (idx) => ramp[idx % ramp.length];
+  const chartWrapRef = useRef(null);
+
   const [rawData, setRawData] = useState([]);
   const [selectedPath, setSelectedPath] = useState('/');
   const [pathOptions, setPathOptions] = useState([]);
-  const [chartMode, setChartMode] = useState('area'); 
-  const [gridMode, setGridMode] = useState('cumulative'); 
-  const [isPerUser, setIsPerUser] = useState(false);
+  const [chartMode, setChartMode] = useState('area');
+  const [gridMode, setGridMode] = useState('cumulative');
+  // 'absolute' | 'perUser' | 'indexed' (indexed = maturation, M0 = 100)
+  const [valueMode, setValueMode] = useState('absolute');
   const [isLogScale, setIsLogScale] = useState(false);
   const [pivotData, setPivotData] = useState([]);
   const [chartData, setChartData] = useState([]);
   const [incrementalData, setIncrementalData] = useState([]);
+  const [calendarData, setCalendarData] = useState([]);
   const [hiddenSeries, setHiddenSeries] = useState(new Set());
-  // Pivot axis: 'cohorts' = one segment, series per cohort month (original behaviour)
-  //             'segments' = one cohort month, series per segment (source/path comparison)
   const [pivotAxis, setPivotAxis] = useState('cohorts');
   const [selectedCohort, setSelectedCohort] = useState(null);
   const [cohortOptions, setCohortOptions] = useState([]);
+  // New view controls
+  const [xMode, setXMode] = useState('maturity');       // 'maturity' | 'calendar'
+  const [layout, setLayout] = useState('overlay');      // 'overlay' | 'multiples'
+  const [showBenchmark, setShowBenchmark] = useState(false);
+  const [showProjection, setShowProjection] = useState(false);
+  const [gridShade, setGridShade] = useState('performance'); // 'performance' | 'calendar'
+  const [projectedNames, setProjectedNames] = useState([]);
+  const [copied, setCopied] = useState(false);
 
   const dimensionLabel = useMemo(() => readDimensionFromCleanCSV(csvData), [csvData]);
+  const [annotations] = useStoredConfig('cohortsuite_annotations_v1', []);
 
   useEffect(() => {
     if (!csvData) return;
+    const parsed = parseCleanCSV(csvData).map(r => ({
+      ...r,
+      percentage: 0
+    }));
+    // re-read percentages (parseCleanCSV drops them; keep original behaviour)
     const lines = csvData.split('\n').map(l => l.trim()).filter(l => l);
-    if (lines.length < 2) return;
-
-    const parsed = [];
     for (let i = 1; i < lines.length; i++) {
-        const line = lines[i];
-        if (!line) continue;
-        const cols = splitCSVLine(line);
-        if (cols.length >= 6) {
-            parsed.push({
-                monthIndex: parseInt(cols[0]),
-                cohortStart: cols[1],
-                path: cols[3],
-                visitors: safeInt(cols[4]),
-                purchases: safeInt(cols[5]),
-                percentage: cols[6] ? parseFloat(cols[6].replace('%', '')) : 0
-            });
-        }
+      const cols = splitCSVLine(lines[i]);
+      if (cols.length >= 7 && parsed[i - 1]) parsed[i - 1].percentage = cols[6] ? parseFloat(cols[6].replace('%', '')) : 0;
     }
     setRawData(parsed);
 
     const paths = Array.from(new Set(parsed.map(d => d.path))).sort();
     setPathOptions(paths);
     if (!paths.includes(selectedPath)) {
-        const hasReserved = paths.includes('RESERVED_TOTAL');
-        setSelectedPath(hasReserved ? 'RESERVED_TOTAL' : (paths[0] || '/'));
+      const hasReserved = paths.includes('RESERVED_TOTAL');
+      setSelectedPath(hasReserved ? 'RESERVED_TOTAL' : (paths[0] || '/'));
     }
-
     const cohorts = Array.from(new Set(parsed.map(d => d.cohortStart))).sort();
     setCohortOptions(cohorts);
     if (!cohorts.includes(selectedCohort)) setSelectedCohort(cohorts[0] || null);
@@ -482,121 +637,286 @@ const CohortExplorer = ({ csvData }) => {
   useEffect(() => {
     if (rawData.length === 0) return;
 
-    // Build one series per cohort month (classic view) or one series per
-    // segment value for a fixed cohort month (source/path comparison view).
     const bySegments = pivotAxis === 'segments';
     const filtered = bySegments
-        ? rawData.filter(d => d.cohortStart === selectedCohort)
-        : rawData.filter(d => d.path === selectedPath);
+      ? rawData.filter(d => d.cohortStart === selectedCohort)
+      : rawData.filter(d => d.path === selectedPath);
     const grouped = {};
-    
+
     filtered.forEach(d => {
-        const key = bySegments ? d.path : d.cohortStart;
-        if (!grouped[key]) {
-            let fmt;
-            if (bySegments) {
-                fmt = key === 'RESERVED_TOTAL' ? 'All Traffic' : key;
-            } else {
-                const dateObj = new Date(d.cohortStart);
-                fmt = !isNaN(dateObj) 
-                    ? dateObj.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }) 
-                    : d.cohortStart;
-            }
-
-            grouped[key] = { 
-                cohortStart: key, 
-                formattedName: fmt,
-                visitors: d.visitors,
-                dataPoints: {} 
-            };
+      const key = bySegments ? d.path : d.cohortStart;
+      if (!grouped[key]) {
+        let fmt;
+        if (bySegments) {
+          fmt = key === 'RESERVED_TOTAL' ? 'All Traffic' : key;
+        } else {
+          const dateObj = new Date(d.cohortStart);
+          fmt = !isNaN(dateObj)
+            ? dateObj.toLocaleDateString('en-US', { month: 'short', year: '2-digit' })
+            : d.cohortStart;
         }
-        grouped[key].dataPoints[d.monthIndex] = {
-            cumulative: d.purchases,
-            percentage: d.percentage
-        };
+        grouped[key] = { cohortStart: key, formattedName: fmt, visitors: d.visitors, dataPoints: {} };
+      }
+      grouped[key].dataPoints[d.monthIndex] = { cumulative: d.purchases, percentage: d.percentage };
     });
 
-    const tableData = Object.values(grouped).sort((a, b) => 
-        bySegments 
-            ? b.visitors - a.visitors  // biggest segments first
-            : a.cohortStart.localeCompare(b.cohortStart)
+    const tableData = Object.values(grouped).sort((a, b) =>
+      bySegments ? b.visitors - a.visitors : a.cohortStart.localeCompare(b.cohortStart)
     );
-    
-    tableData.forEach(row => {
-        const indices = Object.keys(row.dataPoints).map(Number).sort((a, b) => a - b);
-        indices.forEach((idx, i) => {
-            const current = row.dataPoints[idx];
-            if (i > 0) {
-                const prevIdx = indices[i-1];
-                const prev = row.dataPoints[prevIdx];
-                current.diff = current.cumulative - prev.cumulative; 
-                current.growthPct = prev.cumulative > 0 ? ((current.diff / prev.cumulative) * 100).toFixed(2) : 0;
-            } else {
-                current.diff = 0; 
-                current.growthPct = 0;
-            }
-        });
-    });
 
+    tableData.forEach(row => {
+      const indices = Object.keys(row.dataPoints).map(Number).sort((a, b) => a - b);
+      indices.forEach((idx, i) => {
+        const current = row.dataPoints[idx];
+        if (i > 0) {
+          const prev = row.dataPoints[indices[i - 1]];
+          current.diff = current.cumulative - prev.cumulative;
+          current.growthPct = prev.cumulative > 0 ? ((current.diff / prev.cumulative) * 100).toFixed(2) : 0;
+        } else { current.diff = 0; current.growthPct = 0; }
+      });
+    });
     setPivotData(tableData);
+
+    // Per-series base structures (per-user space powers indexed + projections)
+    const series = tableData.map(row => {
+      const cum = {}, pu = {};
+      Object.keys(row.dataPoints).forEach(k => {
+        const i = +k;
+        cum[i] = row.dataPoints[i].cumulative;
+        pu[i] = row.visitors > 0 ? cum[i] / row.visitors : 0;
+      });
+      const maxIdx = Math.max(...Object.keys(cum).map(Number), 0);
+      return { ...row, cum, pu, maxIdx };
+    });
+    const toMode = (s, i) => {
+      if (!(i in s.cum)) return undefined;
+      if (valueMode === 'perUser') return s.pu[i];
+      if (valueMode === 'indexed') return s.pu[0] > 0 ? (s.pu[i] / s.pu[0]) * 100 : undefined;
+      return s.cum[i];
+    };
 
     const maxIndex = Math.max(...filtered.map(d => d.monthIndex), 0);
     const cumulativePoints = [];
     const incrementalPoints = [];
-    
     for (let i = 0; i <= maxIndex; i++) {
-        const cPoint = { index: i };
-        const iPoint = { index: i };
-        
-        tableData.forEach(cohort => {
-            if (cohort.dataPoints[i]) {
-                 // Cumulative data mapping
-                 cPoint[cohort.formattedName] = cohort.dataPoints[i].cumulative;
-                 cPoint[`${cohort.formattedName}_perUser`] = cohort.visitors > 0 ? cohort.dataPoints[i].cumulative / cohort.visitors : 0;
-                 cPoint[`${cohort.formattedName}_growth`] = cohort.dataPoints[i].growthPct;
-                 
-                 // Incremental data mapping
-                 const val = i === 0 ? cohort.dataPoints[i].cumulative : cohort.dataPoints[i].diff;
-                 iPoint[cohort.formattedName] = val;
-                 iPoint[`${cohort.formattedName}_logSafe`] = val > 0 ? val : undefined; // Prevent log scale crash on 0
-                 iPoint[`${cohort.formattedName}_growth`] = cohort.dataPoints[i].growthPct;
-            }
-        });
-        cumulativePoints.push(cPoint);
-        incrementalPoints.push(iPoint);
+      const cPoint = { index: i };
+      const iPoint = { index: i };
+      series.forEach(s => {
+        const v = toMode(s, i);
+        if (v !== undefined) {
+          cPoint[s.formattedName] = v;
+          cPoint[`${s.formattedName}_growth`] = s.dataPoints[i]?.growthPct;
+        }
+        if (s.dataPoints[i]) {
+          const val = i === 0 ? s.dataPoints[i].cumulative : s.dataPoints[i].diff;
+          iPoint[s.formattedName] = val;
+          iPoint[`${s.formattedName}_logSafe`] = val > 0 ? val : undefined;
+          iPoint[`${s.formattedName}_growth`] = s.dataPoints[i].growthPct;
+        }
+      });
+      cumulativePoints.push(cPoint);
+      incrementalPoints.push(iPoint);
     }
+
+    // Benchmark corridor: p25–p75 + median across mature cohorts
+    if (showBenchmark && !bySegments) {
+      const matureAge = Math.min(6, maxIndex);
+      const mature = series.filter(s => s.maxIdx >= matureAge && s.pu[0] > 0);
+      if (mature.length >= 3) {
+        cumulativePoints.forEach((pt, i) => {
+          const vals = mature.map(s => toMode(s, i)).filter(v => v !== undefined);
+          if (vals.length >= 3) {
+            pt['Benchmark band'] = [quantile(vals, 0.25), quantile(vals, 0.75)];
+            pt['Benchmark median'] = quantile(vals, 0.5);
+          }
+        });
+      }
+    }
+
+    // Projections: continue young cohorts using median multipliers from
+    // mature cohorts, with a p25–p75 confidence band.
+    const projNames = [];
+    if (showProjection && !bySegments) {
+      const matureAge = Math.min(6, maxIndex);
+      const mature = series.filter(s => s.maxIdx >= matureAge && s.pu[0] > 0);
+      if (mature.length >= 2) {
+        series.filter(s => s.maxIdx < maxIndex && s.maxIdx >= 1 && s.pu[s.maxIdx] > 0).forEach(s => {
+          const from = s.maxIdx;
+          const conv = (v) => valueMode === 'perUser' ? v
+            : valueMode === 'indexed' ? (s.pu[0] > 0 ? (v / s.pu[0]) * 100 : 0)
+            : v * s.visitors;
+          let emitted = false;
+          for (let t = from; t <= maxIndex; t++) {
+            const ratios = mature.filter(m => m.pu[from] > 0 && (t in m.pu)).map(m => m.pu[t] / m.pu[from]);
+            if (ratios.length < 2) continue;
+            cumulativePoints[t][`${s.formattedName} \u203aproj`] = conv(s.pu[from] * quantile(ratios, 0.5));
+            cumulativePoints[t][`${s.formattedName} \u203aband`] = [conv(s.pu[from] * quantile(ratios, 0.25)), conv(s.pu[from] * quantile(ratios, 0.75))];
+            emitted = true;
+          }
+          if (emitted) projNames.push(s.formattedName);
+        });
+      }
+    }
+    setProjectedNames(projNames);
     setChartData(cumulativePoints);
     setIncrementalData(incrementalPoints);
-  }, [rawData, selectedPath, pivotAxis, selectedCohort]);
+
+    // Calendar-axis data: same series re-keyed to real months
+    if (!bySegments) {
+      const map = {};
+      series.forEach(s => {
+        Object.keys(s.cum).forEach(k => {
+          const i = +k;
+          const m = shiftCalendarMonth(s.cohortStart, i);
+          if (!map[m]) map[m] = { month: m };
+          const v = toMode(s, i);
+          if (v !== undefined) map[m][s.formattedName] = v;
+        });
+      });
+      setCalendarData(Object.values(map).sort((a, b) => a.month.localeCompare(b.month)));
+    } else {
+      setCalendarData([]);
+    }
+  }, [rawData, selectedPath, pivotAxis, selectedCohort, valueMode, showBenchmark, showProjection]);
 
   const toggleSeries = (name) => {
-      const newHidden = new Set(hiddenSeries);
-      if (newHidden.has(name)) newHidden.delete(name);
-      else newHidden.add(name);
-      setHiddenSeries(newHidden);
+    const newHidden = new Set(hiddenSeries);
+    if (newHidden.has(name)) newHidden.delete(name);
+    else newHidden.add(name);
+    setHiddenSeries(newHidden);
   };
 
-  // Returns { className, style } — percentage mode uses an inline
-  // cyan→violet alpha ramp (dynamic Tailwind opacity classes are never
-  // generated at build time, so the old bg-indigo-500/$n approach was a no-op).
-  const getCellStyle = (val, diff) => {
-      if (val === undefined) return { className: 'bg-transparent', style: {} };
-      if (gridMode === 'percentage') {
-          const t = Math.min(val / 5, 1); // 0–5% mapped to full ramp
-          return {
-              className: 'text-white border border-white/10',
-              style: {
-                  background: `linear-gradient(135deg, rgba(34,211,238,${0.06 + t * 0.30}), rgba(139,92,246,${0.04 + t * 0.26}))`,
-                  boxShadow: t > 0.65 ? '0 0 14px -4px rgba(34,211,238,0.45)' : 'none'
-              }
-          };
-      }
-      if (diff > 0) return { className: 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/25', style: {} };
-      if (diff === 0) return { className: 'bg-white/5 text-slate-400', style: {} };
-      return { className: 'bg-slate-700/30 text-slate-400', style: {} };
+  const getCellStyle = (val, diff, row, colIdx) => {
+    if (val === undefined) return { className: 'bg-transparent', style: {}, title: undefined };
+    // Calendar shading: cells sharing a real month share a hue, so period
+    // effects light up as diagonals instead of hiding inside rows.
+    if (gridShade === 'calendar' && pivotAxis === 'cohorts' && row) {
+      const cal = shiftCalendarMonth(row.cohortStart, colIdx);
+      const base = pivotData[0] ? pivotData[0].cohortStart.slice(0, 7) : cal;
+      const off = Math.max(monthDiff(base, cal), 0);
+      const hue = (off * 47) % 360;
+      return {
+        className: 'text-white border border-white/10',
+        style: { background: `hsla(${hue}, 55%, 48%, 0.22)` },
+        title: cal
+      };
+    }
+    if (gridMode === 'percentage') {
+      const t = Math.min(val / 5, 1);
+      return {
+        className: 'text-white border border-white/10',
+        style: {
+          background: `linear-gradient(135deg, rgba(var(--cell-a), ${0.06 + t * 0.30}), rgba(var(--cell-b), ${0.04 + t * 0.26}))`,
+          boxShadow: t > 0.65 ? '0 0 14px -4px rgba(var(--cell-a), 0.45)' : 'none'
+        },
+        title: undefined
+      };
+    }
+    if (diff > 0) return { className: 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/25', style: {}, title: undefined };
+    if (diff === 0) return { className: 'bg-white/5 text-slate-400', style: {}, title: undefined };
+    return { className: 'bg-slate-700/30 text-slate-400', style: {}, title: undefined };
+  };
+
+  const copyGridCSV = () => {
+    const cols = [...Array(6)].map((_, i) => `M${i}`);
+    const head = [pivotAxis === 'segments' ? dimensionLabel : 'Cohort', 'Visitors', ...cols].map(toCSVValue).join(',');
+    const body = pivotData.map(row => {
+      const cells = [...Array(6)].map((_, i) => {
+        const dp = row.dataPoints[i];
+        if (!dp) return '';
+        return gridMode === 'percentage'
+          ? (row.visitors > 0 ? ((dp.cumulative / row.visitors) * 100).toFixed(2) + '%' : '')
+          : dp.cumulative;
+      });
+      return [row.formattedName, row.visitors, ...cells].map(toCSVValue).join(',');
+    });
+    const csv = [head, ...body].join('\n');
+    const done = () => { setCopied(true); setTimeout(() => setCopied(false), 1600); };
+    if (navigator.clipboard?.writeText) navigator.clipboard.writeText(csv).then(done).catch(done);
+    else done();
   };
 
   if (!csvData) return <div className="text-center text-slate-500 py-20">Please upload data in the Ingestion tab first.</div>;
+
+  const isCalendar = xMode === 'calendar' && pivotAxis === 'cohorts' && chartMode === 'area';
+  const activeChartData = isCalendar ? calendarData : chartData;
+  const yTickFmt = (val) => valueMode === 'perUser' ? val.toFixed(3) : valueMode === 'indexed' ? Math.round(val) : val;
+  const visibleSeries = pivotData.filter(r => !hiddenSeries.has(r.formattedName));
+  const multiplesMax = Math.max(
+    ...activeChartData.flatMap(pt => visibleSeries.map(s => (typeof pt[s.formattedName] === 'number' ? pt[s.formattedName] : 0))),
+    0
+  );
+
+  const legendFilter = (entries) => entries.filter(e => !String(e.value).includes('\u203a') && !String(e.value).startsWith('Benchmark'));
+
+  const seriesChart = (
+    <ComposedChart data={activeChartData} margin={{ top: 10, right: 10, left: 0, bottom: 20 }}>
+      <defs>
+        {pivotData.map((cohort, idx) => (
+          <linearGradient key={`grad-${idx}`} id={`grad-${idx}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="5%" stopColor={getColor(idx)} stopOpacity={0.16} />
+            <stop offset="95%" stopColor={getColor(idx)} stopOpacity={0} />
+          </linearGradient>
+        ))}
+      </defs>
+      <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
+      <XAxis
+        dataKey={isCalendar ? 'month' : 'index'}
+        stroke="var(--chart-axis)"
+        tick={{ fill: 'var(--chart-tick)', fontSize: isCalendar ? 10 : 12 }}
+        label={isCalendar ? undefined : { value: 'MONTHS SINCE', position: 'insideBottom', offset: -15, fill: 'var(--chart-axis)', fontSize: 10, fontWeight: 'bold', letterSpacing: '0.15em' }}
+      />
+      <YAxis stroke="var(--chart-axis)" tick={{ fill: 'var(--chart-tick)' }} tickFormatter={yTickFmt} />
+      <Tooltip content={<CustomTooltip />} />
+      <Legend
+        content={(props) => (
+          <div className="flex flex-wrap gap-2 justify-center mt-6 px-4 max-h-24 overflow-y-auto custom-scrollbar">
+            {legendFilter(props.payload).map((entry, index) => {
+              const isHidden = hiddenSeries.has(entry.value);
+              return (
+                <button key={index} onClick={() => toggleSeries(entry.value)} className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-all border ${isHidden ? 'bg-transparent text-slate-600 border-slate-700' : 'bg-white/5 text-slate-200 border-white/10'}`}>
+                  <span className={`w-2 h-2 rounded-full ${isHidden ? 'bg-slate-600' : ''}`} style={{ backgroundColor: isHidden ? undefined : entry.color }} />
+                  {entry.value}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      />
+      {showBenchmark && !isCalendar && pivotAxis === 'cohorts' && (
+        <>
+          <Area dataKey="Benchmark band" name="Benchmark band" stroke="none" fill="var(--band-fill)" activeDot={false} isAnimationActive={false} />
+          <Line dataKey="Benchmark median" name="Benchmark median" stroke="var(--chart-tick)" strokeDasharray="2 4" strokeWidth={1.5} dot={false} isAnimationActive={false} />
+        </>
+      )}
+      {pivotData.map((cohort, idx) => (
+        <Area
+          key={cohort.formattedName}
+          hide={hiddenSeries.has(cohort.formattedName)}
+          type="monotone"
+          dataKey={cohort.formattedName}
+          name={cohort.formattedName}
+          stroke={getColor(idx)}
+          fill={`url(#grad-${idx})`}
+          strokeWidth={2}
+          activeDot={{ r: 6 }}
+        />
+      ))}
+      {showProjection && !isCalendar && pivotAxis === 'cohorts' && projectedNames.map((name) => {
+        const idx = pivotData.findIndex(p => p.formattedName === name);
+        return (
+          <React.Fragment key={`proj-${name}`}>
+            <Area dataKey={`${name} \u203aband`} name={`${name} \u203aband`} hide={hiddenSeries.has(name)} stroke="none" fill={getColor(idx)} fillOpacity={0.09} activeDot={false} isAnimationActive={false} />
+            <Line dataKey={`${name} \u203aproj`} name={`${name} \u203aproj`} hide={hiddenSeries.has(name)} stroke={getColor(idx)} strokeDasharray="5 4" strokeWidth={2} dot={false} isAnimationActive={false} />
+          </React.Fragment>
+        );
+      })}
+      {isCalendar && annotations.map(a => (
+        activeChartData.some(pt => pt.month === a.month) &&
+        <ReferenceLine key={a.id} x={a.month} stroke="var(--warn-c)" strokeDasharray="4 4" label={{ value: a.label, fill: 'var(--warn-c)', fontSize: 10, position: 'top' }} />
+      ))}
+    </ComposedChart>
+  );
 
   return (
     <div className="space-y-6 animate-in fade-in zoom-in duration-300">
@@ -668,138 +988,158 @@ const CohortExplorer = ({ csvData }) => {
               </div>
         </div>
 
+        {/* Analysis lenses — only shown where they apply */}
+        {chartMode === 'area' && (
+          <div className="flex flex-wrap items-center gap-3">
+              <div className="flex bg-white/5 p-1 rounded-xl border border-white/10 text-xs">
+                  <button onClick={() => setValueMode('absolute')} className={`px-3 py-1.5 rounded font-semibold transition-all ${valueMode === 'absolute' ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-400 hover:text-slate-200'}`}>Absolute</button>
+                  <button onClick={() => setValueMode('perUser')} className={`px-3 py-1.5 rounded font-semibold transition-all ${valueMode === 'perUser' ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-400 hover:text-slate-200'}`}>Per User</button>
+                  <button onClick={() => setValueMode('indexed')} className={`px-3 py-1.5 rounded font-semibold transition-all ${valueMode === 'indexed' ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-400 hover:text-slate-200'}`} title="Maturation view: every series indexed to its own Month 0 = 100, so only curve shape differs">Indexed</button>
+              </div>
+              {pivotAxis === 'cohorts' && (
+                <div className="flex bg-white/5 p-1 rounded-xl border border-white/10 text-xs">
+                    <button onClick={() => setXMode('maturity')} className={`px-3 py-1.5 rounded font-semibold transition-all ${xMode === 'maturity' ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-400 hover:text-slate-200'}`}>Maturity axis</button>
+                    <button onClick={() => setXMode('calendar')} className={`px-3 py-1.5 rounded font-semibold transition-all ${xMode === 'calendar' ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-400 hover:text-slate-200'}`} title="Align cohorts in real time to expose seasonality and site-wide events">Calendar axis</button>
+                </div>
+              )}
+              <div className="flex bg-white/5 p-1 rounded-xl border border-white/10 text-xs">
+                  <button onClick={() => setLayout('overlay')} className={`px-3 py-1.5 rounded font-semibold transition-all ${layout === 'overlay' ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-400 hover:text-slate-200'}`}>Overlay</button>
+                  <button onClick={() => setLayout('multiples')} className={`px-3 py-1.5 rounded font-semibold transition-all ${layout === 'multiples' ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-400 hover:text-slate-200'}`} title="Small multiples: one mini-chart per series, shared scale">Multiples</button>
+              </div>
+              {pivotAxis === 'cohorts' && xMode === 'maturity' && layout === 'overlay' && (
+                <>
+                  <button onClick={() => setShowBenchmark(!showBenchmark)} className={`px-3 py-2 rounded-lg text-xs font-semibold border transition-all ${showBenchmark ? 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30' : 'bg-white/5 text-slate-400 border-white/10 hover:text-white'}`} title="Shaded p25–p75 corridor + median across mature cohorts — is this cohort normal?">
+                    Benchmark band
+                  </button>
+                  <button onClick={() => setShowProjection(!showProjection)} className={`px-3 py-2 rounded-lg text-xs font-semibold border transition-all ${showProjection ? 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30' : 'bg-white/5 text-slate-400 border-white/10 hover:text-white'}`} title="Dashed continuation of young cohorts using median multipliers from mature cohorts, with p25–p75 band">
+                    Projections
+                  </button>
+                </>
+              )}
+          </div>
+        )}
+
         <GlassCard className="h-[500px]" title={
             (chartMode === 'area' ? 'Cumulative LTV Curve' : 'Incremental Growth (New Purchases)') +
-            (pivotAxis === 'segments' ? ` — by ${dimensionLabel} (${selectedCohort || ''})` : '')
+            (pivotAxis === 'segments' ? ` — by ${dimensionLabel} (${selectedCohort || ''})` : '') +
+            (valueMode === 'indexed' && chartMode === 'area' ? ' — Indexed (M0 = 100)' : '')
         }>
-            <div className="absolute top-5 right-5 z-20">
-               {chartMode === 'area' && (
-                  <div className="flex bg-[#0e0e12] p-1 rounded-lg border border-white/10 text-xs shadow-lg">
-                      <button onClick={() => setIsPerUser(false)} className={`px-3 py-1.5 rounded transition-all font-semibold ${!isPerUser ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-400 hover:text-slate-200'}`}>Absolute</button>
-                      <button onClick={() => setIsPerUser(true)} className={`px-3 py-1.5 rounded transition-all font-semibold ${isPerUser ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-400 hover:text-slate-200'}`}>Per User</button>
-                  </div>
-               )}
+            <div className="absolute top-5 right-5 z-20 flex items-center gap-2">
                {chartMode === 'line' && (
                   <div className="flex bg-[#0e0e12] p-1 rounded-lg border border-white/10 text-xs shadow-lg">
                       <button onClick={() => setIsLogScale(false)} className={`px-3 py-1.5 rounded transition-all font-semibold ${!isLogScale ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-400 hover:text-slate-200'}`}>Linear</button>
                       <button onClick={() => setIsLogScale(true)} className={`px-3 py-1.5 rounded transition-all font-semibold ${isLogScale ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-400 hover:text-slate-200'}`}>Logarithmic</button>
                   </div>
                )}
+               <button onClick={() => exportChartPNG(chartWrapRef.current, 'cohortsuite_chart')} className="p-2 rounded-lg bg-[#0e0e12] border border-white/10 text-slate-400 hover:text-cyan-300 transition-colors" title="Export chart as PNG">
+                  <Camera size={14} />
+               </button>
             </div>
             
-            <ResponsiveContainer width="100%" height="100%" className="glow-stroke-soft">
-                {chartMode === 'area' ? (
-                    <AreaChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 20 }}>
-                            <defs>
-                            {pivotData.map((cohort, idx) => (
-                                <linearGradient key={`grad-${idx}`} id={`grad-${idx}`} x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="5%" stopColor={getColor(idx)} stopOpacity={0.16}/>
-                                    <stop offset="95%" stopColor={getColor(idx)} stopOpacity={0}/>
-                                </linearGradient>
-                            ))}
-                            </defs>
-                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(125,249,255,0.06)" />
-                            <XAxis 
-                                dataKey="index" 
-                                stroke="#64748b" 
-                                tick={{ fill: '#94a3b8' }} 
-                                label={{ value: 'MONTHS SINCE', position: 'insideBottom', offset: -15, fill: '#64748b', fontSize: 10, fontWeight: 'bold', letterSpacing: '0.15em' }} 
-                            />
-                            <YAxis stroke="#64748b" tick={{ fill: '#94a3b8' }} tickFormatter={(val) => isPerUser ? val.toFixed(3) : val} />
-                            <Tooltip content={<CustomTooltip />} />
-                            <Legend 
-                                content={(props) => (
-                                    <div className="flex flex-wrap gap-2 justify-center mt-6 px-4 max-h-24 overflow-y-auto custom-scrollbar">
-                                        {props.payload.map((entry, index) => {
-                                            const isHidden = hiddenSeries.has(entry.value);
-                                            return (
-                                                <button key={index} onClick={() => toggleSeries(entry.value)} className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-all border ${isHidden ? 'bg-transparent text-slate-600 border-slate-700' : 'bg-white/5 text-slate-200 border-white/10'}`}>
-                                                    <span className={`w-2 h-2 rounded-full ${isHidden ? 'bg-slate-600' : ''}`} style={{ backgroundColor: isHidden ? undefined : entry.color }} />
-                                                    {entry.value}
-                                                </button>
-                                            )
-                                        })}
+            <div ref={chartWrapRef} className="h-full w-full">
+            {layout === 'multiples' && chartMode === 'area' ? (
+                <div className="h-full overflow-y-auto custom-scrollbar pr-2 pt-2">
+                    <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                        {visibleSeries.map((s) => {
+                            const idx = pivotData.findIndex(p => p.formattedName === s.formattedName);
+                            return (
+                                <div key={s.formattedName} className="rounded-xl border border-white/10 bg-white/5 p-3">
+                                    <div className="flex justify-between items-baseline mb-1">
+                                        <span className="text-xs font-bold text-slate-200 truncate mr-2" title={s.formattedName}>{s.formattedName}</span>
+                                        <span className="text-[10px] text-slate-500 data-num shrink-0">{s.visitors.toLocaleString()}</span>
                                     </div>
-                                )}
-                            />
-                            {pivotData.map((cohort, idx) => (
-                                <Area 
-                                key={cohort.formattedName}
-                                hide={hiddenSeries.has(cohort.formattedName)}
-                                type="monotone" 
-                                dataKey={isPerUser ? `${cohort.formattedName}_perUser` : cohort.formattedName} 
-                                name={cohort.formattedName}
-                                stroke={getColor(idx)}
-                                fill={`url(#grad-${idx})`}
-                                strokeWidth={2}
-                                activeDot={{ r: 6 }}
-                                />
-                            ))}
-                    </AreaChart>
-                ) : (
-                    <LineChart data={incrementalData} margin={{ top: 10, right: 10, left: 0, bottom: 20 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(125,249,255,0.06)" />
-                            <XAxis 
-                                dataKey="index" 
-                                stroke="#64748b" 
-                                tick={{ fill: '#94a3b8' }} 
-                                label={{ value: 'MONTHS SINCE', position: 'insideBottom', offset: -15, fill: '#64748b', fontSize: 10, fontWeight: 'bold', letterSpacing: '0.15em' }} 
-                            />
-                            <YAxis 
-                                stroke="#64748b" 
-                                tick={{ fill: '#94a3b8' }} 
-                                scale={isLogScale ? 'log' : 'auto'} 
-                                domain={isLogScale ? [1, 'auto'] : [0, 'auto']} 
-                                allowDataOverflow={isLogScale}
-                            />
-                            <Tooltip content={<CustomTooltip />} />
-                            <Legend 
-                                content={(props) => (
-                                    <div className="flex flex-wrap gap-2 justify-center mt-6 px-4 max-h-24 overflow-y-auto custom-scrollbar">
-                                        {props.payload.map((entry, index) => {
-                                            const isHidden = hiddenSeries.has(entry.value);
-                                            return (
-                                                <button key={index} onClick={() => toggleSeries(entry.value)} className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-all border ${isHidden ? 'bg-transparent text-slate-600 border-slate-700' : 'bg-white/5 text-slate-200 border-white/10'}`}>
-                                                    <span className={`w-2 h-2 rounded-full ${isHidden ? 'bg-slate-600' : ''}`} style={{ backgroundColor: isHidden ? undefined : entry.color }} />
-                                                    {entry.value}
-                                                </button>
-                                            )
-                                        })}
+                                    <div className="h-[110px]">
+                                        <ResponsiveContainer width="100%" height="100%">
+                                            <ComposedChart data={activeChartData} margin={{ top: 4, right: 2, left: 2, bottom: 0 }}>
+                                                <YAxis hide domain={[0, multiplesMax || 'auto']} />
+                                                <XAxis hide dataKey={isCalendar ? 'month' : 'index'} />
+                                                <Tooltip content={<CustomTooltip />} />
+                                                <Area type="monotone" dataKey={s.formattedName} name={s.formattedName} stroke={getColor(idx)} fill={getColor(idx)} fillOpacity={0.12} strokeWidth={2} dot={false} />
+                                            </ComposedChart>
+                                        </ResponsiveContainer>
                                     </div>
-                                )}
-                            />
-                            {pivotData.map((cohort, idx) => (
-                                <Line 
-                                    key={cohort.formattedName}
-                                    hide={hiddenSeries.has(cohort.formattedName)}
-                                    type="monotone"
-                                    dataKey={isLogScale ? `${cohort.formattedName}_logSafe` : cohort.formattedName} 
-                                    name={cohort.formattedName}
-                                    stroke={getColor(idx)}
-                                    strokeWidth={2}
-                                    dot={{ r: 3, strokeWidth: 0, fill: getColor(idx) }}
-                                    activeDot={{ r: 6 }}
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            ) : (
+                <ResponsiveContainer width="100%" height="100%" className="glow-stroke-soft">
+                    {chartMode === 'area' ? seriesChart : (
+                        <LineChart data={incrementalData} margin={{ top: 10, right: 10, left: 0, bottom: 20 }}>
+                                <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
+                                <XAxis 
+                                    dataKey="index" 
+                                    stroke="var(--chart-axis)" 
+                                    tick={{ fill: 'var(--chart-tick)' }} 
+                                    label={{ value: 'MONTHS SINCE', position: 'insideBottom', offset: -15, fill: 'var(--chart-axis)', fontSize: 10, fontWeight: 'bold', letterSpacing: '0.15em' }} 
                                 />
-                            ))}
-                    </LineChart>
-                )}
-            </ResponsiveContainer>
+                                <YAxis 
+                                    stroke="var(--chart-axis)" 
+                                    tick={{ fill: 'var(--chart-tick)' }} 
+                                    scale={isLogScale ? 'log' : 'auto'} 
+                                    domain={isLogScale ? [1, 'auto'] : [0, 'auto']} 
+                                    allowDataOverflow={isLogScale}
+                                />
+                                <Tooltip content={<CustomTooltip />} />
+                                <Legend 
+                                    content={(props) => (
+                                        <div className="flex flex-wrap gap-2 justify-center mt-6 px-4 max-h-24 overflow-y-auto custom-scrollbar">
+                                            {legendFilter(props.payload).map((entry, index) => {
+                                                const isHidden = hiddenSeries.has(entry.value);
+                                                return (
+                                                    <button key={index} onClick={() => toggleSeries(entry.value)} className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-all border ${isHidden ? 'bg-transparent text-slate-600 border-slate-700' : 'bg-white/5 text-slate-200 border-white/10'}`}>
+                                                        <span className={`w-2 h-2 rounded-full ${isHidden ? 'bg-slate-600' : ''}`} style={{ backgroundColor: isHidden ? undefined : entry.color }} />
+                                                        {entry.value}
+                                                    </button>
+                                                )
+                                            })}
+                                        </div>
+                                    )}
+                                />
+                                {pivotData.map((cohort, idx) => (
+                                    <Line 
+                                        key={cohort.formattedName}
+                                        hide={hiddenSeries.has(cohort.formattedName)}
+                                        type="monotone"
+                                        dataKey={isLogScale ? `${cohort.formattedName}_logSafe` : cohort.formattedName} 
+                                        name={cohort.formattedName}
+                                        stroke={getColor(idx)}
+                                        strokeWidth={2}
+                                        dot={{ r: 3, strokeWidth: 0, fill: getColor(idx) }}
+                                        activeDot={{ r: 6 }}
+                                    />
+                                ))}
+                        </LineChart>
+                    )}
+                </ResponsiveContainer>
+            )}
+            </div>
         </GlassCard>
 
         <GlassCard noPadding className="overflow-hidden">
-            <div className="p-6 border-b border-white/5 bg-white/5 flex justify-between items-center">
+            <div className="p-6 border-b border-white/5 bg-white/5 flex justify-between items-center flex-wrap gap-3">
                 <h3 className="text-lg font-bold text-white flex items-center gap-2">
                     <Grid size={18} className="text-cyan-400"/> 
                     {pivotAxis === 'segments' ? `${dimensionLabel} Performance Grid` : 'Cohort Performance Grid'}
                 </h3>
-                <div className="flex items-center gap-3">
-                    {pivotAxis === 'segments' && !isPerUser && chartMode === 'area' && (
+                <div className="flex items-center gap-3 flex-wrap">
+                    {pivotAxis === 'segments' && valueMode === 'absolute' && chartMode === 'area' && (
                         <span className="text-[10px] text-amber-400/80 font-medium hidden md:block">Tip: use "Per User" above for fair segment comparison</span>
+                    )}
+                    {pivotAxis === 'cohorts' && (
+                        <div className="flex bg-slate-900/50 p-1 rounded-lg border border-white/10">
+                            <button onClick={() => setGridShade('performance')} className={`px-3 py-1 rounded text-xs font-medium transition-all ${gridShade === 'performance' ? 'bg-cyan-500/20 text-cyan-400' : 'text-slate-400 hover:text-white'}`}>Performance</button>
+                            <button onClick={() => setGridShade('calendar')} className={`px-3 py-1 rounded text-xs font-medium transition-all ${gridShade === 'calendar' ? 'bg-cyan-500/20 text-cyan-400' : 'text-slate-400 hover:text-white'}`} title="Cells sharing a calendar month share a colour — diagonals reveal period effects (promos, site changes), rows reveal cohort effects">Calendar</button>
+                        </div>
                     )}
                     <div className="flex bg-slate-900/50 p-1 rounded-lg border border-white/10">
                         <button onClick={() => setGridMode('cumulative')} className={`px-3 py-1 rounded text-xs font-medium transition-all ${gridMode === 'cumulative' ? 'bg-cyan-500/20 text-cyan-400' : 'text-slate-400 hover:text-white'}`}>Volume</button>
                         <button onClick={() => setGridMode('percentage')} className={`px-3 py-1 rounded text-xs font-medium transition-all ${gridMode === 'percentage' ? 'bg-cyan-500/20 text-cyan-400' : 'text-slate-400 hover:text-white'}`}>Retention %</button>
                     </div>
+                    <button onClick={copyGridCSV} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${copied ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' : 'bg-white/5 text-slate-400 border-white/10 hover:text-white'}`} title="Copy this grid as CSV">
+                        <Copy size={12} /> {copied ? 'Copied' : 'Copy CSV'}
+                    </button>
                 </div>
             </div>
             <div className="overflow-x-auto">
@@ -819,13 +1159,255 @@ const CohortExplorer = ({ csvData }) => {
                                 {[...Array(6)].map((_, i) => {
                                     const dp = row.dataPoints[i];
                                     const displayVal = gridMode === 'percentage' ? (dp?.cumulative ? ((dp.cumulative / row.visitors) * 100).toFixed(2) + '%' : '-') : dp?.cumulative || '-';
-                                    const cell = dp ? getCellStyle(gridMode === 'percentage' ? parseFloat(displayVal) : dp.cumulative, dp.diff) : null;
+                                    const cell = dp ? getCellStyle(gridMode === 'percentage' ? parseFloat(displayVal) : dp.cumulative, dp.diff, row, i) : null;
                                     return (
                                         <td key={i} className="p-2 border-r border-white/5">
-                                            {dp && <div className={`rounded-lg p-2 text-center text-xs font-bold data-num ${cell.className}`} style={cell.style}>{displayVal}</div>}
+                                            {dp && <div className={`rounded-lg p-2 text-center text-xs font-bold data-num ${cell.className}`} style={cell.style} title={cell.title}>{displayVal}</div>}
                                         </td>
                                     );
                                 })}
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        </GlassCard>
+    </div>
+  );
+};
+
+// --- MODULE 2B: COMPARE LAB ---
+
+const CompareLab = ({ datasets, activeId, onSelectDataset }) => {
+  const ramp = useRamp();
+  const active = datasets.find(d => d.id === activeId) || null;
+  const stats = useMemo(() => active ? computeSegmentStats(parseCleanCSV(active.csv)).sort((a, b) => b.visitors - a.visitors) : [], [active]);
+  const dimensionLabel = useMemo(() => active ? readDimensionFromCleanCSV(active.csv) : '', [active]);
+
+  const realSegs = stats.filter(s => s.path !== 'RESERVED_TOTAL');
+  const [segA, setSegA] = useState(null);
+  const [segB, setSegB] = useState(null);
+  useEffect(() => {
+    if (!realSegs.length) return;
+    if (!realSegs.some(s => s.path === segA)) setSegA(realSegs[0]?.path || null);
+    if (!realSegs.some(s => s.path === segB)) setSegB(realSegs[1]?.path || realSegs[0]?.path || null);
+  }, [active, stats.length]);
+
+  const [aovConfig, saveAov] = useStoredConfig('cohortsuite_aov_v1', { default: 85, overrides: {} });
+  const [cacConfig, saveCac] = useStoredConfig('cohortsuite_cac_v1', { default: 25, overrides: {} });
+  const getCfg = (cfg, path) => {
+    const o = cfg.overrides[path];
+    return (o !== undefined && o !== '' && !isNaN(parseFloat(o))) ? parseFloat(o) : cfg.default;
+  };
+  const payback = (stat, aov, cac) => {
+    if (!stat || !(cac > 0)) return null;
+    for (let m = 0; m <= stat.maxAge; m++) {
+      if (stat.pu[m] !== undefined && stat.pu[m] * aov >= cac) return m;
+    }
+    return null;
+  };
+
+  const A = stats.find(s => s.path === segA);
+  const B = stats.find(s => s.path === segB);
+  // Matched maturity: only compare at ages both segments have actually reached
+  const matchedAge = A && B ? Math.min(A.maxAge, B.maxAge) : 0;
+  const duelData = useMemo(() => {
+    if (!A || !B) return [];
+    const pts = [];
+    for (let m = 0; m <= matchedAge; m++) {
+      pts.push({ index: m, [A.label]: A.pu[m], [B.label]: B.pu[m] });
+    }
+    return pts;
+  }, [A, B, matchedAge]);
+
+  const DeltaChip = ({ label, a, b, fmt, higherIsBetter = true }) => {
+    if (a === null || b === null || a === undefined || b === undefined) return (
+      <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+        <div className="text-[9px] uppercase tracking-[0.18em] text-slate-500 mb-1">{label}</div>
+        <div className="text-xs text-slate-500">insufficient data</div>
+      </div>
+    );
+    const winner = a === b ? null : (a > b) === higherIsBetter ? 'A' : 'B';
+    return (
+      <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+        <div className="text-[9px] uppercase tracking-[0.18em] text-slate-500 mb-1">{label}</div>
+        <div className="flex items-baseline gap-2 text-sm data-num">
+          <span className={winner === 'A' ? 'text-emerald-300 font-bold' : 'text-slate-300'}>{fmt(a)}</span>
+          <span className="text-slate-600 text-xs">vs</span>
+          <span className={winner === 'B' ? 'text-emerald-300 font-bold' : 'text-slate-300'}>{fmt(b)}</span>
+        </div>
+      </div>
+    );
+  };
+
+  // Dimension leaderboard: separation score per dataset — how strongly the
+  // dimension's segments diverge in per-user value, visitor-weighted.
+  const leaderboard = useMemo(() => {
+    return datasets.map(ds => {
+      const segs = computeSegmentStats(parseCleanCSV(ds.csv))
+        .filter(s => s.path !== 'RESERVED_TOTAL' && s.visitors >= 50 && (s.pu[0] || 0) > 0);
+      if (segs.length < 2) return { id: ds.id, name: ds.name, dimension: ds.stats?.dimension, segCount: segs.length, score: null };
+      const basisAge = Math.min(3, ...segs.map(s => s.maxAge));
+      const val = (s) => s.pu[basisAge] !== undefined ? s.pu[basisAge] : s.pu[0];
+      const sorted = [...segs].sort((a, b) => val(b) - val(a));
+      const totalVis = sorted.reduce((a, s) => a + s.visitors, 0);
+      let acc = 0; const top = [], bottom = [];
+      sorted.forEach(s => { (acc < totalVis / 2 ? top : bottom).push(s); acc += s.visitors; });
+      const wavg = (arr) => {
+        const v = arr.reduce((a, s) => a + s.visitors, 0);
+        return v > 0 ? arr.reduce((a, s) => a + val(s) * s.visitors, 0) / v : 0;
+      };
+      const bot = wavg(bottom);
+      return {
+        id: ds.id, name: ds.name, dimension: ds.stats?.dimension,
+        segCount: segs.length, basisAge,
+        score: bot > 0 ? wavg(top) / bot : null,
+        best: sorted[0], worst: sorted[sorted.length - 1], valOf: val
+      };
+    }).sort((a, b) => (b.score || 0) - (a.score || 0));
+  }, [datasets]);
+
+  if (!active) return <div className="text-center text-slate-500 py-20">Please upload data in the Ingestion tab first.</div>;
+
+  return (
+    <div className="space-y-6 animate-in fade-in zoom-in duration-300">
+        {/* SEGMENT DUEL */}
+        <GlassCard title={`Segment Duel — matched maturity (M0–M${matchedAge})`} icon={Scale} className="min-h-[420px]">
+            <div className="flex flex-col lg:flex-row gap-6 mt-2 h-full">
+                <div className="lg:w-[340px] shrink-0 space-y-3">
+                    {[{ v: segA, set: setSegA, tag: 'A', color: ramp[0] }, { v: segB, set: setSegB, tag: 'B', color: ramp[1] }].map(({ v, set, tag, color }) => (
+                        <div key={tag} className="flex items-center gap-2">
+                            <span className="w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-bold shrink-0" style={{ background: `${color}22`, color }}>{tag}</span>
+                            <select value={v || ''} onChange={(e) => set(e.target.value)} className="appearance-none flex-1 bg-white/5 border border-white/10 text-white rounded-xl px-3 py-2.5 text-xs font-medium focus:outline-none focus:border-cyan-500/50 cursor-pointer hover:bg-white/10 transition-colors">
+                                {realSegs.map(s => <option key={s.path} value={s.path} className="bg-slate-900 text-slate-200">{s.label}</option>)}
+                            </select>
+                        </div>
+                    ))}
+                    {A && B && (
+                        <div className="grid grid-cols-1 gap-2 pt-2">
+                            <DeltaChip label="M0 conversion" a={A.m0Conv} b={B.m0Conv} fmt={(v) => v.toFixed(2) + '%'} />
+                            <DeltaChip label={`Value / user @ M${matchedAge}`} a={A.pu[matchedAge]} b={B.pu[matchedAge]} fmt={(v) => v?.toFixed(4)} />
+                            <DeltaChip label="Tail ratio (M3 ÷ M0)" a={A.tail} b={B.tail} fmt={(v) => v.toFixed(2) + '×'} />
+                            <DeltaChip label="Fragility (CV of M0 conv)" a={A.fragility} b={B.fragility} fmt={(v) => v.toFixed(0) + '%'} higherIsBetter={false} />
+                            <DeltaChip label="Payback month (AOV/CAC below)" a={payback(A, getCfg(aovConfig, A.path), getCfg(cacConfig, A.path))} b={payback(B, getCfg(aovConfig, B.path), getCfg(cacConfig, B.path))} fmt={(v) => 'M' + v} higherIsBetter={false} />
+                        </div>
+                    )}
+                </div>
+                <div className="flex-1 min-h-[300px]">
+                    <ResponsiveContainer width="100%" height="100%" className="glow-stroke-soft">
+                        <ComposedChart data={duelData} margin={{ top: 10, right: 10, left: 0, bottom: 10 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
+                            <XAxis dataKey="index" stroke="var(--chart-axis)" tick={{ fill: 'var(--chart-tick)' }} />
+                            <YAxis stroke="var(--chart-axis)" tick={{ fill: 'var(--chart-tick)' }} tickFormatter={(v) => v.toFixed(3)} />
+                            <Tooltip content={<CustomTooltip />} />
+                            <Legend wrapperStyle={{ fontSize: '12px' }} />
+                            {A && <Line type="monotone" dataKey={A.label} stroke={ramp[0]} strokeWidth={3} dot={false} activeDot={{ r: 5 }} />}
+                            {B && <Line type="monotone" dataKey={B.label} stroke={ramp[1]} strokeWidth={3} dot={false} activeDot={{ r: 5 }} />}
+                        </ComposedChart>
+                    </ResponsiveContainer>
+                    <div className="text-[10px] text-slate-500 text-center -mt-1">Per-user cumulative value · both segments clipped to the age both have reached</div>
+                </div>
+            </div>
+        </GlassCard>
+
+        {/* SEGMENT ECONOMICS */}
+        <GlassCard noPadding className="overflow-hidden">
+            <div className="p-6 border-b border-white/5 bg-white/5">
+                <h3 className="text-lg font-bold text-white flex items-center gap-2"><ShoppingCart size={18} className="text-cyan-400" /> Segment Economics — {dimensionLabel}</h3>
+                <p className="text-xs text-slate-500 mt-1">AOV and CAC are editable and stored locally. Payback = first month where value/user × AOV covers CAC.</p>
+            </div>
+            <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-sm">
+                    <thead>
+                        <tr className="bg-white/5 text-xs text-slate-400 uppercase tracking-wider">
+                            <th className="p-4 border-b border-white/10">{dimensionLabel}</th>
+                            <th className="p-4 border-b border-white/10 text-right">Visitors</th>
+                            <th className="p-4 border-b border-white/10 text-right">M0 Conv</th>
+                            <th className="p-4 border-b border-white/10 text-right" title="Weighted per-user cumulative value at the segment's max observed age">Value/User</th>
+                            <th className="p-4 border-b border-white/10 text-right">AOV £</th>
+                            <th className="p-4 border-b border-white/10 text-right">CAC £</th>
+                            <th className="p-4 border-b border-white/10 text-center">Payback</th>
+                            <th className="p-4 border-b border-white/10 text-center" title="M3 cumulative ÷ M0 — does this segment compound after acquisition?">Tail M3/M0</th>
+                            <th className="p-4 border-b border-white/10 text-center" title="Coefficient of variation of M0 conversion across cohorts — high = don't scale on one good month">Fragility</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/5">
+                        {realSegs.map((s) => {
+                            const aov = getCfg(aovConfig, s.path);
+                            const cac = getCfg(cacConfig, s.path);
+                            const pb = payback(s, aov, cac);
+                            const fragTone = s.fragility < 15 ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/25' : s.fragility < 35 ? 'bg-amber-500/10 text-amber-300 border-amber-500/25' : 'bg-rose-500/10 text-rose-300 border-rose-500/25';
+                            return (
+                                <tr key={s.path} className="hover:bg-white/5 transition-colors">
+                                    <td className="p-4 font-bold text-white max-w-[260px] truncate" title={s.label}>{s.label}</td>
+                                    <td className="p-4 text-right data-num text-slate-300">{s.visitors.toLocaleString()}</td>
+                                    <td className="p-4 text-right data-num text-cyan-300">{s.m0Conv.toFixed(2)}%</td>
+                                    <td className="p-4 text-right data-num text-slate-200">{s.latestPU.toFixed(4)}</td>
+                                    <td className="p-3 text-right">
+                                        <input type="number" value={aovConfig.overrides[s.path] ?? aovConfig.default}
+                                            onChange={(e) => saveAov({ ...aovConfig, overrides: { ...aovConfig.overrides, [s.path]: e.target.value } })}
+                                            className="w-16 bg-white/5 border border-white/10 rounded px-1.5 py-1 text-cyan-300 text-xs font-mono text-right focus:outline-none focus:border-cyan-500/50" />
+                                    </td>
+                                    <td className="p-3 text-right">
+                                        <input type="number" value={cacConfig.overrides[s.path] ?? cacConfig.default}
+                                            onChange={(e) => saveCac({ ...cacConfig, overrides: { ...cacConfig.overrides, [s.path]: e.target.value } })}
+                                            className="w-16 bg-white/5 border border-white/10 rounded px-1.5 py-1 text-violet-300 text-xs font-mono text-right focus:outline-none focus:border-cyan-500/50" />
+                                    </td>
+                                    <td className="p-4 text-center">
+                                        {pb !== null
+                                          ? <span className="px-2 py-1 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/25 text-xs font-bold data-num">M{pb}</span>
+                                          : <span className="px-2 py-1 rounded bg-rose-500/10 text-rose-300 border border-rose-500/25 text-xs font-bold" title="Never recovers CAC within observed window">—</span>}
+                                    </td>
+                                    <td className="p-4 text-center data-num text-slate-300">{s.tail !== null ? s.tail.toFixed(2) + '×' : '—'}</td>
+                                    <td className="p-4 text-center">
+                                        <span className={`px-2 py-1 rounded border text-xs font-bold data-num ${fragTone}`}>{s.fragility.toFixed(0)}%</span>
+                                    </td>
+                                </tr>
+                            );
+                        })}
+                    </tbody>
+                </table>
+            </div>
+        </GlassCard>
+
+        {/* DIMENSION LEADERBOARD */}
+        <GlassCard noPadding className="overflow-hidden">
+            <div className="p-6 border-b border-white/5 bg-white/5">
+                <h3 className="text-lg font-bold text-white flex items-center gap-2"><Trophy size={18} className="text-amber-400" /> Dimension Leaderboard</h3>
+                <p className="text-xs text-slate-500 mt-1">Which GA4 breakdown actually separates outcomes? Score = visitor-weighted value of the top half of segments ÷ bottom half. Upload more exports (source, campaign, device, city…) to rank them.</p>
+            </div>
+            <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-sm">
+                    <thead>
+                        <tr className="bg-white/5 text-xs text-slate-400 uppercase tracking-wider">
+                            <th className="p-4 border-b border-white/10">Dataset</th>
+                            <th className="p-4 border-b border-white/10">Dimension</th>
+                            <th className="p-4 border-b border-white/10 text-center">Segments</th>
+                            <th className="p-4 border-b border-white/10 text-center">Separation</th>
+                            <th className="p-4 border-b border-white/10">Strongest Segment</th>
+                            <th className="p-4 border-b border-white/10">Weakest Segment</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/5">
+                        {leaderboard.map((row, i) => (
+                            <tr key={row.id} onClick={() => onSelectDataset(row.id)} className={`cursor-pointer transition-colors hover:bg-white/5 ${row.id === activeId ? 'bg-cyan-500/5' : ''}`} title="Click to make this the active dataset">
+                                <td className="p-4 font-bold text-white">
+                                    <span className="text-slate-500 data-num mr-2">#{i + 1}</span>{row.name}
+                                    {row.id === activeId && <span className="ml-2 text-[9px] px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 uppercase">Active</span>}
+                                </td>
+                                <td className="p-4 text-slate-400 text-xs">{row.dimension}</td>
+                                <td className="p-4 text-center data-num text-slate-300">{row.segCount}</td>
+                                <td className="p-4 text-center">
+                                    {row.score !== null
+                                      ? <span className="text-lg font-bold data-num glow-num text-cyan-300">{row.score.toFixed(2)}×</span>
+                                      : <span className="text-xs text-slate-500">needs 2+ segments</span>}
+                                </td>
+                                <td className="p-4 text-xs">
+                                    {row.best ? <><span className="text-emerald-300 font-bold">{row.best.label}</span> <span className="text-slate-500 data-num">({row.valOf(row.best).toFixed(4)}/user @M{row.basisAge})</span></> : '—'}
+                                </td>
+                                <td className="p-4 text-xs">
+                                    {row.worst ? <><span className="text-rose-300 font-bold">{row.worst.label}</span> <span className="text-slate-500 data-num">({row.valOf(row.worst).toFixed(4)}/user)</span></> : '—'}
+                                </td>
                             </tr>
                         ))}
                     </tbody>
@@ -865,6 +1447,18 @@ const VelocityExplorer = ({ csvData }) => {
 
   const dimensionLabel = useMemo(() => readDimensionFromCleanCSV(csvData), [csvData]);
   const isPathDimension = /path|page/i.test(dimensionLabel);
+  const velocityChartRef = useRef(null);
+
+  // Timeline annotations: local notes pinned to calendar months, rendered as
+  // markers here and on the cohort calendar-axis chart.
+  const [annotations, saveAnnotations] = useStoredConfig('cohortsuite_annotations_v1', []);
+  const [annMonth, setAnnMonth] = useState('');
+  const [annLabel, setAnnLabel] = useState('');
+  const addAnnotation = () => {
+    if (!annMonth || !annLabel.trim()) return;
+    saveAnnotations([...annotations, { id: `${Date.now().toString(36)}`, month: annMonth, label: annLabel.trim() }]);
+    setAnnMonth(''); setAnnLabel('');
+  };
 
   useEffect(() => {
     if (!csvData) return;
@@ -1081,32 +1675,63 @@ const VelocityExplorer = ({ csvData }) => {
 
                 {/* Velocity vs Traffic Chart - Moved horizontally between cards and table */}
                 <GlassCard title="Purchase Velocity vs Traffic" icon={Filter} className="h-[400px]">
-                    <div className="h-full w-full pt-4">
+                    <button onClick={() => exportChartPNG(velocityChartRef.current, 'cohortsuite_velocity')} className="absolute top-5 right-5 z-20 p-2 rounded-lg bg-[#0e0e12] border border-white/10 text-slate-400 hover:text-cyan-300 transition-colors" title="Export chart as PNG">
+                        <Camera size={14} />
+                    </button>
+                    <div className="h-full w-full pt-4" ref={velocityChartRef}>
                         <ResponsiveContainer width="100%" height="100%">
                             <ComposedChart data={overallData}>
                                 <defs>
                                     <linearGradient id="gradPurchases" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="5%" stopColor="#22d3ee" stopOpacity={0.5}/>
-                                        <stop offset="95%" stopColor="#22d3ee" stopOpacity={0}/>
+                                        <stop offset="5%" stopColor="var(--accent)" stopOpacity={0.5}/>
+                                        <stop offset="95%" stopColor="var(--accent)" stopOpacity={0}/>
                                     </linearGradient>
                                     <linearGradient id="strokeIridescent" x1="0" y1="0" x2="1" y2="0">
-                                        <stop offset="0%" stopColor="#22d3ee"/>
-                                        <stop offset="55%" stopColor="#7df9ff"/>
-                                        <stop offset="100%" stopColor="#a78bfa"/>
+                                        <stop offset="0%" stopColor="var(--accent)"/>
+                                        <stop offset="55%" stopColor="var(--electric-c)"/>
+                                        <stop offset="100%" stopColor="var(--partner-c)"/>
                                     </linearGradient>
                                 </defs>
-                                <CartesianGrid strokeDasharray="3 3" stroke="rgba(125,249,255,0.06)" vertical={false} />
-                                <XAxis dataKey="month" stroke="#64748b" tick={{fontSize:10}} axisLine={false} tickLine={false} />
-                                <YAxis yAxisId="left" stroke="#8b5cf6" tick={{fontSize:10}} axisLine={false} tickLine={false} tickFormatter={(val) => (val/1000).toFixed(0)+'k'} />
-                                <YAxis yAxisId="right" orientation="right" stroke="#06b6d4" tick={{fontSize:10}} axisLine={false} tickLine={false} />
+                                <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
+                                <XAxis dataKey="month" stroke="var(--chart-axis)" tick={{fontSize:10}} axisLine={false} tickLine={false} />
+                                <YAxis yAxisId="left" stroke="var(--partner-c)" tick={{fontSize:10}} axisLine={false} tickLine={false} tickFormatter={(val) => (val/1000).toFixed(0)+'k'} />
+                                <YAxis yAxisId="right" orientation="right" stroke="var(--accent)" tick={{fontSize:10}} axisLine={false} tickLine={false} />
                                 <Tooltip content={CustomTooltip} />
                                 <Legend wrapperStyle={{fontSize: '12px', paddingTop: '10px'}} />
-                                <Area yAxisId="left" type="monotone" dataKey="visitors" name="Traffic" stroke="#8b5cf6" fill="#8b5cf6" fillOpacity={0.1} strokeWidth={2} />
-                                <Line yAxisId="right" type="monotone" dataKey="purchases" name="Purchases" stroke="url(#strokeIridescent)" strokeWidth={3} dot={{r:0}} activeDot={{r:6, fill:"#7df9ff", strokeWidth:0}} className="glow-stroke" />
-                                <ReferenceLine yAxisId="right" y={parseFloat(latest.velocity) * 30} stroke="#94a3b8" strokeDasharray="3 3" />
+                                <Area yAxisId="left" type="monotone" dataKey="visitors" name="Traffic" stroke="var(--partner-c)" fill="var(--partner-c)" fillOpacity={0.1} strokeWidth={2} />
+                                <Line yAxisId="right" type="monotone" dataKey="purchases" name="Purchases" stroke="url(#strokeIridescent)" strokeWidth={3} dot={{r:0}} activeDot={{r:6, fill:"var(--electric-c)", strokeWidth:0}} className="glow-stroke" />
+                                <ReferenceLine yAxisId="right" y={parseFloat(latest.velocity) * 30} stroke="var(--chart-axis)" strokeDasharray="3 3" />
+                                {annotations.map(a => overallData.some(d => d.month === a.month) && (
+                                    <ReferenceLine key={a.id} yAxisId="left" x={a.month} stroke="var(--warn-c)" strokeDasharray="4 4" label={{ value: a.label, fill: 'var(--warn-c)', fontSize: 10, position: 'top' }} />
+                                ))}
                             </ComposedChart>
                         </ResponsiveContainer>
                     </div>
+                </GlassCard>
+
+                {/* Timeline annotations */}
+                <GlassCard title="Timeline Annotations" icon={Flag}>
+                    <p className="text-xs text-slate-500 -mt-2 mb-4">Pin real-world events (campaign rebuilds, promos, site changes) to months. Markers render here and on the Calendar-axis cohort chart. Stored locally in this browser.</p>
+                    <div className="flex flex-wrap items-center gap-3 mb-4">
+                        <input type="month" value={annMonth} onChange={(e) => setAnnMonth(e.target.value)}
+                            className="bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-cyan-500/50" />
+                        <input type="text" value={annLabel} onChange={(e) => setAnnLabel(e.target.value)} placeholder="e.g. LHR campaign rebuild"
+                            onKeyDown={(e) => { if (e.key === 'Enter') addAnnotation(); }}
+                            className="flex-1 min-w-[200px] bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-cyan-500/50" />
+                        <button onClick={addAnnotation} className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 text-sm font-semibold hover:bg-cyan-500/25 transition-colors">
+                            <Plus size={14} /> Add
+                        </button>
+                    </div>
+                    {annotations.length > 0 && (
+                        <div className="flex flex-wrap gap-2">
+                            {annotations.map(a => (
+                                <span key={a.id} className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-500/10 text-amber-300 border border-amber-500/25 text-xs font-medium">
+                                    <Flag size={11} /> <span className="data-num">{a.month}</span> {a.label}
+                                    <button onClick={() => saveAnnotations(annotations.filter(x => x.id !== a.id))} className="text-amber-400/60 hover:text-amber-200 transition-colors"><X size={12} /></button>
+                                </span>
+                            ))}
+                        </div>
+                    )}
                 </GlassCard>
 
                 {/* Monthly Cohort Performance Table */}
@@ -1231,20 +1856,20 @@ const VelocityExplorer = ({ csvData }) => {
                                         <AreaChart data={selectedPath.trend}>
                                             <defs>
                                                 <linearGradient id="gradPath" x1="0" y1="0" x2="0" y2="1">
-                                                    <stop offset="5%" stopColor="#22d3ee" stopOpacity={0.28}/>
-                                                    <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0}/>
+                                                    <stop offset="5%" stopColor="var(--accent)" stopOpacity={0.28}/>
+                                                    <stop offset="95%" stopColor="var(--partner-c)" stopOpacity={0}/>
                                                 </linearGradient>
                                                 <linearGradient id="strokePath" x1="0" y1="0" x2="1" y2="0">
-                                                    <stop offset="0%" stopColor="#34d399"/>
-                                                    <stop offset="60%" stopColor="#22d3ee"/>
-                                                    <stop offset="100%" stopColor="#7df9ff"/>
+                                                    <stop offset="0%" stopColor="var(--mint-c)"/>
+                                                    <stop offset="60%" stopColor="var(--accent)"/>
+                                                    <stop offset="100%" stopColor="var(--electric-c)"/>
                                                 </linearGradient>
                                             </defs>
-                                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(125,249,255,0.06)" vertical={false} />
-                                            <XAxis dataKey="month" stroke="#64748b" tick={{fontSize:12}} axisLine={false} tickLine={false} />
-                                            <YAxis stroke="#64748b" tick={{fontSize:12}} axisLine={false} tickLine={false} />
+                                            <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
+                                            <XAxis dataKey="month" stroke="var(--chart-axis)" tick={{fontSize:12}} axisLine={false} tickLine={false} />
+                                            <YAxis stroke="var(--chart-axis)" tick={{fontSize:12}} axisLine={false} tickLine={false} />
                                             <Tooltip content={CustomTooltip} />
-                                            <Area type="monotone" dataKey="purchases" stroke="url(#strokePath)" strokeWidth={3} fill="url(#gradPath)" activeDot={{r:6, fill:"#7df9ff", strokeWidth:0}} className="glow-stroke" />
+                                            <Area type="monotone" dataKey="purchases" stroke="url(#strokePath)" strokeWidth={3} fill="url(#gradPath)" activeDot={{r:6, fill:"var(--electric-c)", strokeWidth:0}} className="glow-stroke" />
                                         </AreaChart>
                                     </ResponsiveContainer>
                                 </div>
@@ -1267,8 +1892,8 @@ const VelocityExplorer = ({ csvData }) => {
                                                     dataKey="value"
                                                     stroke="none"
                                                 >
-                                                    <Cell key="share" fill="#22d3ee" style={{filter: "drop-shadow(0 0 8px rgba(34,211,238,0.5))"}} />
-                                                    <Cell key="rest" fill="rgba(125,249,255,0.09)" />
+                                                    <Cell key="share" fill="var(--accent)" style={{filter: "drop-shadow(0 0 8px rgba(34,211,238,0.35))"}} />
+                                                    <Cell key="rest" fill="var(--band-fill)" />
                                                 </Pie>
                                             </PieChart>
                                         </ResponsiveContainer>
@@ -1304,6 +1929,17 @@ const App = () => {
   const [datasets, setDatasets] = useState([]);
   const [activeId, setActiveId] = useState(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [theme, setTheme] = useState(() => {
+    try { return localStorage.getItem('cohortsuite_theme') || 'dark'; } catch { return 'dark'; }
+  });
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    try { localStorage.setItem('cohortsuite_theme', theme); } catch {}
+  }, [theme]);
+
+  const handleRenameDataset = (id, name) => {
+    setDatasets(prev => prev.map(d => d.id === id ? { ...d, name } : d));
+  };
 
   const activeDataset = datasets.find(d => d.id === activeId) || null;
   const csvData = activeDataset?.csv || null;
@@ -1347,6 +1983,7 @@ const App = () => {
   );
 
   return (
+    <ThemeContext.Provider value={theme}>
     <div className="min-h-screen bg-void text-slate-200 font-sans selection:bg-cyan-500/30 selection:text-cyan-100 overflow-hidden flex">
       
        {/* Ambient Layer: drifting aurora, masked cyber grid, film grain */}
@@ -1383,6 +2020,7 @@ const App = () => {
               <div className="text-xs font-bold text-slate-600 uppercase tracking-widest px-4 mb-2 mt-6">Analytics</div>
               <NavItem id="cohort" label="Cohort Analysis" icon={LayoutDashboard} />
               <NavItem id="velocity" label="Purchase Velocity" icon={Zap} />
+              <NavItem id="compare" label="Compare Lab" icon={Scale} />
 
               {datasets.length > 0 && (
                 <div className="pt-6">
@@ -1407,12 +2045,20 @@ const App = () => {
 
           <div className="p-4 border-t border-white/5">
             <div className="bg-white/5 rounded-xl p-4 border border-white/5">
-                <div className="flex items-center gap-3 mb-2">
+                <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center text-white font-bold text-xs">U</div>
-                    <div className="text-xs">
+                    <div className="text-xs flex-1">
                         <div className="text-white font-bold">User Session</div>
                         <div className="text-slate-500">Local Processing</div>
                     </div>
+                    <button
+                        onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+                        className="p-2 rounded-lg bg-white/5 border border-white/10 text-slate-400 hover:text-cyan-300 transition-colors"
+                        title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+                        aria-label="Toggle theme"
+                    >
+                        {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+                    </button>
                 </div>
             </div>
           </div>
@@ -1421,9 +2067,14 @@ const App = () => {
       {/* Mobile Header */}
       <div className="md:hidden fixed top-0 left-0 right-0 h-16 bg-[#05070b]/90 backdrop-blur-xl z-40 flex items-center justify-between px-4 after:absolute after:inset-x-0 after:bottom-0 after:h-px after:bg-gradient-to-r after:from-cyan-500/30 after:via-violet-500/15 after:to-transparent">
          <span className="font-bold shimmer-text">CohortSuite</span>
-         <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} className="text-slate-300">
-             <Menu />
-         </button>
+         <div className="flex items-center gap-2">
+            <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} className="text-slate-300 p-2" aria-label="Toggle theme">
+                {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+            </button>
+            <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} className="text-slate-300">
+                <Menu />
+            </button>
+         </div>
       </div>
 
       {/* Main Content */}
@@ -1433,16 +2084,19 @@ const App = () => {
                  {activeTab === 'etl' && 'Pipeline · Stage 01'}
                  {activeTab === 'cohort' && 'Analytics · GA4 First-Touch Cohorts'}
                  {activeTab === 'velocity' && 'Analytics · Run-Rate & Conversion'}
+                 {activeTab === 'compare' && 'Analytics · Cross-Segment Intelligence'}
              </div>
              <h2 className="text-3xl md:text-4xl font-light text-white mb-2 capitalize tracking-tight">
                  {activeTab === 'etl' && <>Data <span className="font-bold">Preparation</span></>}
                  {activeTab === 'cohort' && <>Retention <span className="font-bold">&amp; LTV</span></>}
                  {activeTab === 'velocity' && <>Velocity <span className="font-bold">&amp; Paths</span></>}
+                 {activeTab === 'compare' && <>Compare <span className="font-bold">Lab</span></>}
              </h2>
              <p className="text-slate-400 text-sm">
                  {activeTab === 'etl' && 'Clean, standardise, and prepare your raw GA4 export.'}
                  {activeTab === 'cohort' && 'Analyse cumulative growth and retention heatmaps.'}
                  {activeTab === 'velocity' && 'Understand purchase speed and top converting pages.'}
+                 {activeTab === 'compare' && 'Duel segments at matched maturity, price paybacks, and rank which GA4 dimension actually separates outcomes.'}
              </p>
           </header>
 
@@ -1454,14 +2108,17 @@ const App = () => {
                     activeId={activeId} 
                     onSelect={setActiveId} 
                     onRemove={handleRemoveDataset} 
+                    onRename={handleRenameDataset}
                 />
              )}
              {activeTab === 'cohort' && <CohortExplorer csvData={csvData} />}
              {activeTab === 'velocity' && <VelocityExplorer csvData={csvData} />}
+             {activeTab === 'compare' && <CompareLab datasets={datasets} activeId={activeId} onSelectDataset={setActiveId} />}
           </div>
       </main>
 
     </div>
+    </ThemeContext.Provider>
   );
 };
 
