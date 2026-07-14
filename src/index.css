@@ -528,3 +528,16 @@ input[type="number"],
 input[type="month"] {
   font-variant-numeric: tabular-nums;
 }
+
+
+/* ============================================================
+   NUMBER INPUT SPINNERS — theme-matched instead of Chrome's
+   default white. color-scheme makes the native stepper render
+   dark-on-dark / light-on-light.
+   ============================================================ */
+input[type="number"] {
+  color-scheme: dark;
+}
+[data-theme="light"] input[type="number"] {
+  color-scheme: light;
+}
