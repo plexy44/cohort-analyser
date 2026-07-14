@@ -1935,14 +1935,14 @@ const VelocityExplorer = ({ csvData }) => {
                 {/* Sidebar List */}
                 <div className="lg:col-span-1 flex flex-col gap-4 h-[calc(100vh-200px)] overflow-y-auto custom-scrollbar pr-2">
                     <div className="flex items-center gap-2 text-white font-bold mb-2">
-                        <Zap size={18} className="text-amber-400" /> {isPathDimension ? 'Top Entry Points' : `Top ${dimensionLabel}`}
+                        <ListOrdered size={16} className="text-cyan-400" strokeWidth={2.25} /> {isPathDimension ? 'Top Entry Points' : `Top ${dimensionLabel}`}
                     </div>
                     {pathData.map(p => (
                         <GlassCard 
                             key={p.path} 
                             onClick={() => setSelectedPath(p)}
                             isActive={selectedPath?.path === p.path}
-                            className="group transition-all hover:scale-[1.02] shrink-0"
+                            className="group relative transition-all hover:scale-[1.008] hover:z-10 shrink-0"
                             noPadding
                             quiet
                         >
