@@ -455,3 +455,50 @@ html:not([data-theme="light"]) body {
   border-color: rgba(8, 145, 178, 0.32);
   box-shadow: 0 14px 34px -16px rgba(23, 49, 71, 0.4);
 }
+
+
+/* ============================================================
+   NO SHIMMER, ANYWHERE. Rotating card borders, sweeping caustic
+   sheen and logo shimmer are all frozen — static gradients only.
+   Entrance transitions and hovers are untouched.
+   ============================================================ */
+.liquid-glass::before {
+  animation: none !important;
+}
+.liquid-glass::after {
+  display: none !important;
+}
+.shimmer-text {
+  animation: none !important;
+  background-position: 30% 0 !important;
+}
+.aurora-blob {
+  animation: none !important;
+}
+
+/* Month input: real label instead of Chrome's dash placeholder,
+   correct picker icon colour per theme */
+input[type="month"] {
+  color-scheme: dark;
+}
+[data-theme="light"] input[type="month"] {
+  color-scheme: light;
+}
+input[type="month"].month-empty:not(:focus) {
+  color: transparent;
+}
+input[type="month"].month-empty:not(:focus)::-webkit-calendar-picker-indicator {
+  opacity: 0.6;
+}
+
+/* Calendar grid shading gradient endpoints (older -> newer) */
+:root {
+  --cal-a: 124, 58, 237;   /* violet = oldest months */
+  --cal-b: 34, 211, 238;   /* cyan = newest months */
+  --cal-alpha: 0.40;
+}
+[data-theme="light"] {
+  --cal-a: 124, 58, 237;
+  --cal-b: 8, 145, 178;
+  --cal-alpha: 0.16;
+}
