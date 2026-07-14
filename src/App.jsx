@@ -8,7 +8,7 @@ import {
   Upload, FileDown, ArrowRight, CheckCircle, AlertCircle, RefreshCw, Database,
   LayoutDashboard, Layers, Zap, TrendingUp, Filter, Eye, EyeOff, BarChart2,
   Grid, Activity, Users, ShoppingCart, Percent, Map as MapIcon, ChevronRight, Menu, ArrowUpRight, ArrowDownRight, Trash2,
-  Sun, Moon, Camera, Copy, Pencil, Plus, X, Trophy, Scale, Flag
+  Sun, Moon, Camera, Copy, Pencil, Plus, X, Trophy, Scale, Flag, Gauge
 } from 'lucide-react';
 
 // --- THEME SYSTEM ---
@@ -400,7 +400,7 @@ const DataIngestion = ({ onAdd, datasets, activeId, onSelect, onRemove, onRename
   };
 
   return (
-    <div className="w-full max-w-3xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+    <div className="w-full max-w-3xl mx-auto space-y-8 animate-in fade-in slide-in-from-right-4 duration-500">
       <div className="text-center space-y-4">
         <h2 className="text-3xl font-light text-white">Data <span className="font-bold text-cyan-400">Ingestion</span></h2>
         <p className="text-slate-400 max-w-lg mx-auto">Upload one or more raw GA4 Cohort Export CSVs — e.g. one broken down by page path and one by first user source/medium. The breakdown dimension is detected automatically.</p>
@@ -821,13 +821,17 @@ const CohortExplorer = ({ csvData }) => {
     // Calendar shading: cells sharing a real month share a hue, so period
     // effects light up as diagonals instead of hiding inside rows.
     if (gridShade === 'calendar' && pivotAxis === 'cohorts' && row) {
+      // Cells sharing a real month share a colour; the palette is an ORDERED
+      // gradient (oldest month = violet, newest = cyan) so diagonals pop and
+      // the eye can read time at a glance.
       const cal = shiftCalendarMonth(row.cohortStart, colIdx);
       const base = pivotData[0] ? pivotData[0].cohortStart.slice(0, 7) : cal;
-      const off = Math.max(monthDiff(base, cal), 0);
-      const hue = (off * 47) % 360;
+      const last = pivotData.length ? shiftCalendarMonth(pivotData[pivotData.length - 1].cohortStart, 5) : cal;
+      const span = Math.max(monthDiff(base, last), 1);
+      const pct = Math.round(Math.min(Math.max(monthDiff(base, cal) / span, 0), 1) * 100);
       return {
         className: 'text-white border border-white/10',
-        style: { background: `hsla(${hue}, 55%, 48%, 0.22)` },
+        style: { background: `color-mix(in oklab, rgba(var(--cal-b), var(--cal-alpha)) ${pct}%, rgba(var(--cal-a), var(--cal-alpha)))` },
         title: cal
       };
     }
@@ -932,15 +936,15 @@ const CohortExplorer = ({ csvData }) => {
           </React.Fragment>
         );
       })}
-      {isCalendar && annotations.map(a => (
+      {isCalendar && annotations.map((a, ai) => (
         activeChartData.some(pt => pt.month === a.month) &&
-        <ReferenceLine key={a.id} x={a.month} stroke="var(--warn-c)" strokeDasharray="4 4" label={{ value: a.label, fill: 'var(--warn-c)', fontSize: 10, position: 'top' }} />
+        <ReferenceLine key={a.id} x={a.month} stroke="var(--warn-c)" strokeDasharray="4 4" label={{ value: a.label, fill: 'var(--warn-c)', fontSize: 10, position: 'insideTop', dy: 6 + (ai % 3) * 14 }} />
       ))}
     </ComposedChart>
   );
 
   return (
-    <div className="space-y-6 animate-in fade-in zoom-in duration-300">
+    <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-500">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
              <div className="flex flex-col sm:flex-row gap-4 w-full md:w-auto items-stretch sm:items-center">
                 <div className="flex bg-white/5 p-1 rounded-xl border border-white/10 shrink-0">
@@ -1068,7 +1072,7 @@ const CohortExplorer = ({ csvData }) => {
           </div>
         )}
 
-        <GlassCard className="h-[500px]" title={
+        <GlassCard className={layout === 'multiples' && chartMode === 'area' ? 'min-h-[300px]' : 'h-[500px]'} title={
             (chartMode === 'area' ? 'Cumulative LTV Curve' : 'Incremental Growth (New Purchases)') +
             (pivotAxis === 'segments' ? ` — by ${dimensionLabel} (${selectedCohort || ''})` : '') +
             (valueMode === 'indexed' && chartMode === 'area' ? ' — Indexed (M0 = 100)' : '')
@@ -1094,7 +1098,7 @@ const CohortExplorer = ({ csvData }) => {
             
             <div ref={chartWrapRef} className="h-full w-full">
             {layout === 'multiples' && chartMode === 'area' ? (
-                <div className="h-full overflow-y-auto custom-scrollbar pr-2 pt-2">
+                <div className="pt-2">
                     <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                         {visibleSeries.map((s) => {
                             const idx = pivotData.findIndex(p => p.formattedName === s.formattedName);
@@ -1188,7 +1192,7 @@ const CohortExplorer = ({ csvData }) => {
                             <Tip tip="Cells coloured by movement: green = grew vs previous month, red = fell, grey = flat.">
                             <button onClick={() => setGridShade('performance')} className={`px-3 py-1 rounded text-xs font-medium transition-all ${gridShade === 'performance' ? 'bg-cyan-500/20 text-cyan-400' : 'text-slate-400 hover:text-white'}`}>Performance</button>
                             </Tip>
-                            <Tip tip="Cells in the same REAL month share a colour (hover a cell to see which). A glowing diagonal = something hit everyone that month (promo, site change, season). A standout row = that cohort's users were simply better.">
+                            <Tip tip="Cells in the same REAL month share a colour, shading violet (oldest) to cyan (newest) — hover a cell to see which month. A diagonal stripe = something hit everyone that month (promo, site change, season). A standout row = that cohort's users were simply better.">
                             <button onClick={() => setGridShade('calendar')} className={`px-3 py-1 rounded text-xs font-medium transition-all ${gridShade === 'calendar' ? 'bg-cyan-500/20 text-cyan-400' : 'text-slate-400 hover:text-white'}`}>Calendar</button>
                             </Tip>
                         </div>
@@ -1340,7 +1344,7 @@ const CompareLab = ({ datasets, activeId, onSelectDataset }) => {
   if (!active) return <div className="text-center text-slate-500 py-20">Please upload data in the Ingestion tab first.</div>;
 
   return (
-    <div className="space-y-6 animate-in fade-in zoom-in duration-300">
+    <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-500">
         {/* SEGMENT DUEL */}
         <GlassCard title={`Segment Duel — matched maturity (M0–M${matchedAge})`} icon={Scale} className="min-h-[420px]">
             <div className="flex flex-col lg:flex-row gap-6 mt-2 h-full">
@@ -1535,8 +1539,18 @@ const VelocityExplorer = ({ csvData }) => {
   const [annLabel, setAnnLabel] = useState('');
   const addAnnotation = () => {
     if (!annMonth || !annLabel.trim()) return;
-    saveAnnotations([...annotations, { id: `${Date.now().toString(36)}`, month: annMonth, label: annLabel.trim() }]);
-    setAnnMonth(''); setAnnLabel('');
+    // Read the freshest stored list before appending (multiple mounted
+    // instances share the key) and keep the month selected afterwards —
+    // Chrome's controlled month input keeps DISPLAYING a cleared value, so
+    // re-picking it fires no change event and the next Add silently no-ops.
+    let current = annotations;
+    try {
+      const s = localStorage.getItem('cohortsuite_annotations_v1');
+      if (s) current = JSON.parse(s);
+    } catch {}
+    const id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    saveAnnotations([...current, { id, month: annMonth, label: annLabel.trim() }]);
+    setAnnLabel('');
   };
 
   useEffect(() => {
@@ -1788,8 +1802,8 @@ const VelocityExplorer = ({ csvData }) => {
                                 <Area yAxisId="left" type="monotone" dataKey="visitors" name="Traffic" stroke="var(--partner-c)" fill="var(--partner-c)" fillOpacity={0.1} strokeWidth={2} />
                                 <Line yAxisId="right" type="monotone" dataKey="purchases" name="Purchases" stroke="url(#strokeIridescent)" strokeWidth={3} dot={{r:0}} activeDot={{r:6, fill:"var(--electric-c)", strokeWidth:0}} className="glow-stroke" />
                                 <ReferenceLine yAxisId="right" y={parseFloat(latest.velocity) * 30} stroke="var(--chart-axis)" strokeDasharray="3 3" />
-                                {annotations.map(a => overallData.some(d => d.month === a.month) && (
-                                    <ReferenceLine key={a.id} yAxisId="left" x={a.month} stroke="var(--warn-c)" strokeDasharray="4 4" label={{ value: a.label, fill: 'var(--warn-c)', fontSize: 10, position: 'top' }} />
+                                {annotations.map((a, ai) => overallData.some(d => d.month === a.month) && (
+                                    <ReferenceLine key={a.id} yAxisId="left" x={a.month} stroke="var(--warn-c)" strokeDasharray="4 4" label={{ value: a.label, fill: 'var(--warn-c)', fontSize: 10, position: 'insideTop', dy: 6 + (ai % 3) * 14 }} />
                                 ))}
                             </ComposedChart>
                         </ResponsiveContainer>
@@ -1800,8 +1814,13 @@ const VelocityExplorer = ({ csvData }) => {
                 <GlassCard title="Timeline Annotations" icon={Flag}>
                     <p className="text-xs text-slate-500 -mt-2 mb-4">Pin real-world events (campaign rebuilds, promos, site changes) to months. Markers render here and on the Calendar-axis cohort chart. Stored locally in this browser.</p>
                     <div className="flex flex-wrap items-center gap-3 mb-4">
-                        <input type="month" value={annMonth} onChange={(e) => setAnnMonth(e.target.value)}
-                            className="bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-cyan-500/50" />
+                        <div className="relative">
+                            <input type="month" value={annMonth} onChange={(e) => setAnnMonth(e.target.value)}
+                                className={`month-input bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-cyan-500/50 min-w-[170px] ${!annMonth ? 'month-empty' : ''}`} />
+                            {!annMonth && (
+                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-500 pointer-events-none">Month &amp; Year</span>
+                            )}
+                        </div>
                         <input type="text" value={annLabel} onChange={(e) => setAnnLabel(e.target.value)} placeholder="e.g. LHR campaign rebuild"
                             onKeyDown={(e) => { if (e.key === 'Enter') addAnnotation(); }}
                             className="flex-1 min-w-[200px] bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-cyan-500/50" />
@@ -1856,7 +1875,7 @@ const VelocityExplorer = ({ csvData }) => {
                 </GlassCard>
             </div>
          ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in zoom-in duration-300">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in slide-in-from-right-4 duration-500">
                 {/* Sidebar List */}
                 <div className="lg:col-span-1 flex flex-col gap-4 h-[calc(100vh-200px)] overflow-y-auto custom-scrollbar pr-2">
                     <div className="flex items-center gap-2 text-white font-bold mb-2">
@@ -2054,17 +2073,23 @@ const App = () => {
   const NavItem = ({ id, label, icon: Icon }) => (
     <button 
         onClick={() => { setActiveTab(id); setIsMobileMenuOpen(false); }}
-        className={`relative w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium overflow-hidden ${
+        className={`relative w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all font-medium overflow-hidden ${
             activeTab === id 
-            ? 'bg-gradient-to-r from-cyan-500/15 to-violet-500/5 text-cyan-300 shadow-[0_0_24px_-8px_rgba(34,211,238,0.5)]' 
+            ? 'bg-gradient-to-r from-cyan-500/12 to-transparent text-cyan-300' 
             : 'text-slate-400 hover:text-white hover:bg-white/5'
         }`}
     >
         {activeTab === id && (
-            <span className="absolute left-0 top-1/2 -translate-y-1/2 h-6 w-[3px] rounded-r-full bg-gradient-to-b from-cyan-400 to-violet-500 shadow-[0_0_10px_rgba(34,211,238,0.8)]" />
+            <span className="absolute left-0 top-1/2 -translate-y-1/2 h-7 w-[3px] rounded-r-full bg-gradient-to-b from-cyan-400 to-violet-500" />
         )}
-        <Icon size={20} className={activeTab === id ? 'drop-shadow-[0_0_6px_rgba(34,211,238,0.6)]' : ''} />
-        <span>{label}</span>
+        <span className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border transition-all ${
+            activeTab === id
+            ? 'bg-gradient-to-br from-cyan-500/25 to-violet-500/20 border-cyan-400/40 text-cyan-200 shadow-[0_0_16px_-4px_rgba(34,211,238,0.5)]'
+            : 'bg-white/5 border-white/10 text-slate-400 group-hover:text-white'
+        }`}>
+            <Icon size={17} strokeWidth={2.25} />
+        </span>
+        <span className="text-sm">{label}</span>
         {id === 'etl' && csvData && <div className="ml-auto w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_10px_#34d399]"></div>}
     </button>
   );
@@ -2106,7 +2131,7 @@ const App = () => {
               
               <div className="text-xs font-bold text-slate-600 uppercase tracking-widest px-4 mb-2 mt-6">Analytics</div>
               <NavItem id="cohort" label="Cohort Analysis" icon={LayoutDashboard} />
-              <NavItem id="velocity" label="Purchase Velocity" icon={Zap} />
+              <NavItem id="velocity" label="Purchase Velocity" icon={Gauge} />
               <NavItem id="compare" label="Compare Lab" icon={Scale} />
 
               {datasets.length > 0 && (
