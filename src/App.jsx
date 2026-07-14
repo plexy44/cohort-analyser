@@ -8,7 +8,7 @@ import {
   Upload, FileDown, ArrowRight, CheckCircle, AlertCircle, RefreshCw, Database,
   LayoutDashboard, Layers, Zap, TrendingUp, Filter, Eye, EyeOff, BarChart2,
   Grid, Activity, Users, ShoppingCart, Percent, Map as MapIcon, ChevronRight, Menu, ArrowUpRight, ArrowDownRight, Trash2,
-  Sun, Moon, Camera, Copy, Pencil, Plus, X, Trophy, Scale, Flag, Gauge
+  Sun, Moon, Camera, Copy, Pencil, Plus, X, Trophy, Scale, Flag, Gauge, FlaskConical, ListOrdered
 } from 'lucide-react';
 
 // --- THEME SYSTEM ---
@@ -1216,8 +1216,8 @@ const CohortExplorer = ({ csvData }) => {
                 <table className="w-full text-left border-collapse">
                     <thead>
                         <tr className="bg-white/5 text-xs text-slate-400 uppercase tracking-wider">
-                            <th className="p-4 border-b border-white/10 sticky left-0 bg-[#05070b] z-10">{pivotAxis === 'segments' ? dimensionLabel : 'Cohort'}</th>
-                            <th className="p-4 border-b border-white/10 text-right">Visitors</th>
+                            <th className="p-4 border-b border-white/10 sticky left-0 bg-[#05070b] z-10"><Tip tip={pivotAxis === 'segments' ? 'One row per segment of the selected cohort month, biggest first.' : 'One row per monthly cohort: everyone whose FIRST visit fell in that month.'}><span className="cursor-help">{pivotAxis === 'segments' ? dimensionLabel : 'Cohort'}</span></Tip></th>
+                            <th className="p-4 border-b border-white/10 text-right"><Tip tip="First-touch visitors in the cohort — the denominator for every Retention % cell in the row."><span className="cursor-help">Visitors</span></Tip></th>
                             {[...Array(6)].map((_, i) => <th key={i} className="p-4 border-b border-white/10 text-center"><Tip tip={i === 0 ? 'Month 0 = the month users first arrived.' : `${i} month${i > 1 ? 's' : ''} after first visit.`}><span className="cursor-help">M{i}</span></Tip></th>)}
                         </tr>
                     </thead>
@@ -1456,7 +1456,7 @@ const CompareLab = ({ datasets, activeId, onSelectDataset }) => {
         {/* DIMENSION LEADERBOARD */}
         <GlassCard noPadding className="overflow-hidden">
             <div className="p-6 border-b border-white/5 bg-white/5">
-                <h3 className="text-lg font-bold text-white flex items-center gap-2"><Trophy size={18} className="text-amber-400" /> Dimension Leaderboard</h3>
+                <h3 className="text-lg font-bold text-white flex items-center gap-2"><ListOrdered size={18} className="text-cyan-400" /> Dimension Leaderboard</h3>
                 <p className="text-xs text-slate-500 mt-1">Which GA4 breakdown actually separates outcomes? Score = visitor-weighted value of the top half of segments ÷ bottom half. Upload more exports (source, campaign, device, city…) to rank them.</p>
             </div>
             <div className="overflow-x-auto">
@@ -1467,8 +1467,8 @@ const CompareLab = ({ datasets, activeId, onSelectDataset }) => {
                             <th className="p-4 border-b border-white/10">Dimension</th>
                             <th className="p-4 border-b border-white/10 text-center"><Tip tip="Segments with 50+ visitors and at least one purchase — smaller ones are excluded as noise."><span className="cursor-help">Segments</span></Tip></th>
                             <th className="p-4 border-b border-white/10 text-center"><Tip tip="Visitor-weighted value of the TOP half of segments ÷ the BOTTOM half. 1.0× = this dimension doesn't matter; 3×+ = optimising by this dimension moves real money. Rank your exports here to decide what to segment by."><span className="cursor-help">Separation</span></Tip></th>
-                            <th className="p-4 border-b border-white/10">Strongest Segment</th>
-                            <th className="p-4 border-b border-white/10">Weakest Segment</th>
+                            <th className="p-4 border-b border-white/10"><Tip tip="Highest per-user value segment at the comparison age — your scaling candidate for this dimension."><span className="cursor-help">Strongest Segment</span></Tip></th>
+                            <th className="p-4 border-b border-white/10"><Tip tip="Lowest per-user value segment — where budget or page effort is leaking."><span className="cursor-help">Weakest Segment</span></Tip></th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-white/5">
@@ -1727,13 +1727,28 @@ const VelocityExplorer = ({ csvData }) => {
   // Find Peak Velocity Month
   const peakMonthObj = kpiData.find(d => parseFloat(d.velocity) === maxVelocity) || {};
 
+  // Portfolio value across every segment we received data for: each segment's
+  // purchases × its effective AOV (override if set, else the editable default).
+  // Recalculates live as AOVs change.
+  const totalPathPurchases = pathData.reduce((a, p) => a + p.purchases, 0);
+  const totalEstValue = pathData.reduce((a, p) => a + p.purchases * getAov(p.path), 0);
+
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-500">
          {/* Toggle View */}
          <div className="flex justify-between items-center flex-wrap gap-4">
-            <h2 className="text-xl font-bold text-white">
-                {view === 'overview' ? 'Purchase Velocity' : (isPathDimension ? 'Top Performing Paths' : `Top ${dimensionLabel} Segments`)}
-            </h2>
+            <div className="flex items-center gap-3 flex-wrap">
+                <h2 className="text-xl font-bold text-white">
+                    {view === 'overview' ? 'Purchase Velocity' : (isPathDimension ? 'Top Performing Paths' : `Top ${dimensionLabel} Segments`)}
+                </h2>
+                {view === 'paths' && (
+                    <Tip tip="Estimated value generated across ALL segments in this dataset: each segment's purchases × its AOV (per-segment override if set, otherwise the editable default below). Updates live as you edit AOVs.">
+                        <span className="px-3 py-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/25 text-cyan-300 text-sm font-bold data-num cursor-help">
+                            £{Math.round(totalEstValue).toLocaleString()} est. value
+                        </span>
+                    </Tip>
+                )}
+            </div>
             <div className="flex items-center gap-3 flex-wrap">
                 {partialMonth && (
                     <Tip tip={`${partialMonth} isn't finished yet, so its purchases and conversion are incomplete. Excluded from KPI cards by default so run-rates aren't understated. Click to include it anyway.`}>
@@ -1765,10 +1780,18 @@ const VelocityExplorer = ({ csvData }) => {
             <div className="space-y-6">
                 {/* KPIs */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                    <GlassCard title="Latest Velocity" icon={TrendingUp} value={latest.velocity} subtext={`Purchases/Day in ${latest.month}${latest.isPartial ? ' (partial)' : ''}`} />
-                    <GlassCard title="Peak Velocity" icon={Zap} value={maxVelocity.toFixed(1)} subtext={`Occurred in ${peakMonthObj.month}`} />
-                    <GlassCard title="Total Visitors" icon={Users} value={(totalVisitors / 1000000).toFixed(2) + 'M'} trend={visitorTrend >= 0 ? 'up' : 'down'} trendValue={`${Math.abs(visitorTrend)}% vs Prev Month`} subtext="Cohort users (first touch)" />
-                    <GlassCard title="Avg Conversion" icon={Percent} value={avgConv + '%'} subtext="Total purchases ÷ total visitors" />
+                    <Tip className="block" tip="Purchases per day in the most recent counted month — the cleanest 'how fast are we selling right now' number. Partial months divide by elapsed days, not the full month.">
+                        <GlassCard title="Latest Velocity" icon={TrendingUp} value={latest.velocity} subtext={`Purchases/Day in ${latest.month}${latest.isPartial ? ' (partial)' : ''}`} className="h-full cursor-help" />
+                    </Tip>
+                    <Tip className="block" tip="Best purchases-per-day month on record. The gap between latest and peak is your recoverable headroom — worth asking what was different that month.">
+                        <GlassCard title="Peak Velocity" icon={Zap} value={maxVelocity.toFixed(1)} subtext={`Occurred in ${peakMonthObj.month}`} className="h-full cursor-help" />
+                    </Tip>
+                    <Tip className="block" tip="All first-touch cohort visitors in range. The trend chip compares the two most recent counted months — traffic rising with flat purchases means conversion is slipping.">
+                        <GlassCard title="Total Visitors" icon={Users} value={(totalVisitors / 1000000).toFixed(2) + 'M'} trend={visitorTrend >= 0 ? 'up' : 'down'} trendValue={`${Math.abs(visitorTrend)}% vs Prev Month`} subtext="Cohort users (first touch)" className="h-full cursor-help" />
+                    </Tip>
+                    <Tip className="block" tip="Total purchases ÷ total visitors, visitor-weighted — one small freak month can't distort it the way an average-of-averages would.">
+                        <GlassCard title="Avg Conversion" icon={Percent} value={avgConv + '%'} subtext="Total purchases ÷ total visitors" className="h-full cursor-help" />
+                    </Tip>
                 </div>
 
                 {/* Velocity vs Traffic Chart - Moved horizontally between cards and table */}
@@ -1844,11 +1867,11 @@ const VelocityExplorer = ({ csvData }) => {
                 <GlassCard title="Monthly Cohort Performance" noPadding className="overflow-hidden">
                      <div className="p-6 pb-2">
                         <div className="grid grid-cols-5 text-xs font-bold text-slate-500 uppercase tracking-wider mb-4 border-b border-white/10 pb-4">
-                            <div className="col-span-1">Month</div>
-                            <div className="text-right">Visitors</div>
-                            <div className="text-right">Purchases</div>
-                            <div className="text-right">Conv. Rate</div>
-                            <div className="text-right">Velocity (P/D)</div>
+                            <div className="col-span-1"><Tip tip="Calendar month. Amber bar + PARTIAL tag = the month isn't finished yet."><span className="cursor-help">Month</span></Tip></div>
+                            <div className="text-right"><Tip tip="New first-touch visitors whose cohort STARTED this month."><span className="cursor-help">Visitors</span></Tip></div>
+                            <div className="text-right"><Tip tip="ALL purchases landing in this calendar month — from this month's new visitors AND older cohorts still converting. That's why it can exceed what the new cohort alone produced."><span className="cursor-help">Purchases</span></Tip></div>
+                            <div className="text-right"><Tip tip="This month's purchases ÷ this month's new visitors. A blended in-month rate, not a cohort rate."><span className="cursor-help">Conv. Rate</span></Tip></div>
+                            <div className="text-right"><Tip tip="Purchases per day — monthly total ÷ days (elapsed days for a partial month). Comparable across long and short months."><span className="cursor-help">Velocity (P/D)</span></Tip></div>
                         </div>
                      </div>
                      <div className="overflow-y-auto max-h-[400px] custom-scrollbar px-6 pb-6">
@@ -1875,7 +1898,40 @@ const VelocityExplorer = ({ csvData }) => {
                 </GlassCard>
             </div>
          ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in slide-in-from-right-4 duration-500">
+            <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-500">
+            <GlassCard noPadding>
+                <div className="p-5 grid grid-cols-2 md:grid-cols-4 gap-6 items-center">
+                    <Tip className="block" tip={`Number of ${isPathDimension ? 'pages' : 'segments'} in this dataset with cohort data (All Traffic total excluded).`}>
+                        <div className="cursor-help">
+                            <div className="text-[10px] font-bold tracking-[0.2em] uppercase text-slate-500 mb-1.5">{isPathDimension ? 'Pages' : 'Segments'}</div>
+                            <div className="text-2xl font-bold text-white data-num">{pathData.length}</div>
+                        </div>
+                    </Tip>
+                    <Tip className="block" tip="Every purchase attributed to these segments across all cohorts and months.">
+                        <div className="cursor-help">
+                            <div className="text-[10px] font-bold tracking-[0.2em] uppercase text-slate-500 mb-1.5">Total Purchases</div>
+                            <div className="text-2xl font-bold text-cyan-300 data-num">{totalPathPurchases.toLocaleString()}</div>
+                        </div>
+                    </Tip>
+                    <Tip className="block" tip="Fallback average order value applied to every segment WITHOUT its own override. Edit it and every estimate on this page recalculates instantly. Stored in this browser.">
+                        <div>
+                            <div className="text-[10px] font-bold tracking-[0.2em] uppercase text-slate-500 mb-1.5">Default AOV</div>
+                            <div className="flex items-center gap-1 text-2xl font-bold text-white data-num">
+                                £<input type="number" value={aovConfig.default}
+                                    onChange={(e) => saveAov({ ...aovConfig, default: e.target.value === '' ? 0 : parseFloat(e.target.value) || 0 })}
+                                    className="w-24 bg-white/5 border border-white/10 rounded-lg px-2 py-1 text-cyan-300 text-xl font-mono focus:outline-none focus:border-cyan-500/50" />
+                            </div>
+                        </div>
+                    </Tip>
+                    <Tip className="block" tip="Σ over every segment of (purchases × that segment's AOV). Segments with an override use it; the rest use the default. This is the value your whole tracked portfolio has generated, at your pricing assumptions.">
+                        <div className="cursor-help">
+                            <div className="text-[10px] font-bold tracking-[0.2em] uppercase text-slate-500 mb-1.5">Estimated Total Value</div>
+                            <div className="text-2xl font-bold text-white data-num glow-num">£{Math.round(totalEstValue).toLocaleString()}</div>
+                        </div>
+                    </Tip>
+                </div>
+            </GlassCard>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* Sidebar List */}
                 <div className="lg:col-span-1 flex flex-col gap-4 h-[calc(100vh-200px)] overflow-y-auto custom-scrollbar pr-2">
                     <div className="flex items-center gap-2 text-white font-bold mb-2">
@@ -1896,7 +1952,9 @@ const VelocityExplorer = ({ csvData }) => {
                                         <div className="font-bold text-lg text-white truncate capitalize" title={p.label}>{p.label}</div>
                                         <div className="text-[10px] text-slate-500 font-mono truncate">{p.path}</div>
                                     </div>
-                                    <div className={`text-lg font-bold ${parseFloat(p.conversion) > 4 ? 'text-emerald-400' : 'text-white'}`}>{p.conversion}%</div>
+                                    <Tip tip="Lifetime conversion: cumulative purchases ÷ first-touch visitors, across every month since acquisition. Green above 4%.">
+                                    <div className={`text-lg font-bold cursor-help ${parseFloat(p.conversion) > 4 ? 'text-emerald-400' : 'text-white'}`}>{p.conversion}%</div>
+                                    </Tip>
                                 </div>
                                 
                                 <div className="grid grid-cols-2 gap-4">
@@ -1931,7 +1989,7 @@ const VelocityExplorer = ({ csvData }) => {
                                     </div>
                                     <div>
                                         <div className="text-xs text-slate-400 uppercase tracking-wider mb-1 flex items-center gap-2">
-                                            Revenue Est.
+                                            <Tip tip="This segment's purchases × its AOV. Edit the AOV to price this segment correctly — an override here beats the page-level default."><span className="cursor-help">Revenue Est.</span></Tip>
                                             <span className="flex items-center gap-1 normal-case tracking-normal">
                                                 (£
                                                 <input 
@@ -1983,7 +2041,8 @@ const VelocityExplorer = ({ csvData }) => {
 
                             {/* Mini Metrics */}
                             <div className="grid grid-cols-2 gap-6">
-                                <GlassCard title="VISITOR SHARE" className="h-[240px]">
+                                <Tip className="block" tip="This segment's share of ALL first-touch visitors in the dataset. Big ring + low conversion = high-traffic page underdelivering; small ring + high conversion = a scaling candidate.">
+                                <GlassCard title="VISITOR SHARE" className="h-[240px] cursor-help">
                                     <div className="h-full flex items-center justify-center relative -mt-4">
                                         <ResponsiveContainer width="100%" height="100%">
                                             <PieChart>
@@ -2009,18 +2068,22 @@ const VelocityExplorer = ({ csvData }) => {
                                         </div>
                                     </div>
                                 </GlassCard>
+                                </Tip>
 
-                                <GlassCard title="TOTAL CONVERSION" className="h-[240px] flex items-center justify-center">
+                                <Tip className="block" tip="Cumulative purchases ÷ cohort visitors, ALL months since first touch — lifetime conversion, so it will read higher than any single-month rate.">
+                                <GlassCard title="TOTAL CONVERSION" className="h-[240px] flex items-center justify-center cursor-help">
                                     <div className="flex flex-col items-center justify-center h-full -mt-6" title="Cumulative purchases ÷ cohort visitors, all months since first touch">
                                         <div className="text-6xl font-bold text-emerald-300 mb-2 data-num" style={{textShadow: "0 0 28px rgba(52,211,153,0.4)"}}>{selectedPath.conversion}%</div>
                                         <div className="text-xs text-slate-500 uppercase tracking-[0.2em]">Purchases ÷ Visitors</div>
                                         <div className="text-[9px] text-slate-600 mt-1">cumulative, all months since first touch</div>
                                     </div>
                                 </GlassCard>
+                                </Tip>
                             </div>
                         </>
                     )}
                 </div>
+            </div>
             </div>
          )}
     </div>
@@ -2070,29 +2133,29 @@ const App = () => {
     });
   };
 
-  const NavItem = ({ id, label, icon: Icon }) => (
+  const NavItem = ({ id, label, icon: Icon }) => {
+    const active = activeTab === id;
+    return (
     <button 
         onClick={() => { setActiveTab(id); setIsMobileMenuOpen(false); }}
-        className={`relative w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all font-medium overflow-hidden ${
-            activeTab === id 
-            ? 'bg-gradient-to-r from-cyan-500/12 to-transparent text-cyan-300' 
-            : 'text-slate-400 hover:text-white hover:bg-white/5'
+        className={`relative w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-all font-medium ${
+            active 
+            ? 'border-cyan-400/25 bg-cyan-400/[0.06] text-cyan-200' 
+            : 'border-transparent text-slate-400 hover:text-white hover:bg-white/5'
         }`}
     >
-        {activeTab === id && (
-            <span className="absolute left-0 top-1/2 -translate-y-1/2 h-7 w-[3px] rounded-r-full bg-gradient-to-b from-cyan-400 to-violet-500" />
-        )}
         <span className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border transition-all ${
-            activeTab === id
-            ? 'bg-gradient-to-br from-cyan-500/25 to-violet-500/20 border-cyan-400/40 text-cyan-200 shadow-[0_0_16px_-4px_rgba(34,211,238,0.5)]'
-            : 'bg-white/5 border-white/10 text-slate-400 group-hover:text-white'
+            active
+            ? 'bg-gradient-to-br from-cyan-400 to-violet-500 border-transparent text-white shadow-[0_4px_18px_-6px_rgba(34,211,238,0.7)]'
+            : 'bg-white/5 border-white/10 text-slate-400'
         }`}>
             <Icon size={17} strokeWidth={2.25} />
         </span>
-        <span className="text-sm">{label}</span>
+        <span className={`text-sm ${active ? 'font-semibold' : ''}`}>{label}</span>
         {id === 'etl' && csvData && <div className="ml-auto w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_10px_#34d399]"></div>}
     </button>
-  );
+    );
+  };
 
   return (
     <ThemeContext.Provider value={theme}>
@@ -2132,11 +2195,12 @@ const App = () => {
               <div className="text-xs font-bold text-slate-600 uppercase tracking-widest px-4 mb-2 mt-6">Analytics</div>
               <NavItem id="cohort" label="Cohort Analysis" icon={LayoutDashboard} />
               <NavItem id="velocity" label="Purchase Velocity" icon={Gauge} />
-              <NavItem id="compare" label="Compare Lab" icon={Scale} />
+              <NavItem id="compare" label="Compare Lab" icon={FlaskConical} />
 
               {datasets.length > 0 && (
                 <div className="pt-6">
                     <div className="text-xs font-bold text-slate-600 uppercase tracking-widest px-4 mb-2">Active Dataset</div>
+                    <Tip className="block" tip="Every analytics tab reads from this dataset. Switch here to analyse a different GA4 export; the Dimension Leaderboard in Compare Lab reads all of them at once.">
                     <select 
                         value={activeId || ''}
                         onChange={(e) => setActiveId(e.target.value)}
@@ -2146,6 +2210,7 @@ const App = () => {
                             <option key={d.id} value={d.id} className="bg-slate-900 text-slate-200">{d.name}</option>
                         ))}
                     </select>
+                    </Tip>
                     {activeDataset && (
                         <div className="text-[10px] text-slate-600 font-mono px-4 mt-2 truncate" title={activeDataset.stats.dimension}>
                             {activeDataset.stats.dimension}
