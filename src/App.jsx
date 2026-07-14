@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, createContext, useContext } from 'react';
+import { createPortal } from 'react-dom';
 import { 
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
   AreaChart, Area, Legend, BarChart, Bar, LineChart, Line, ComposedChart, ReferenceLine, Cell, PieChart, Pie 
@@ -73,7 +74,35 @@ const AnimatedValue = ({ value }) => {
   return <>{display === null ? '--' : display}</>;
 };
 
-const GlassCard = ({ children, className = "", title, icon: Icon, value, trend, trendValue, subtext, onClick, isActive, noPadding, quiet }) => (
+// Hover tooltip. Rendered through a portal into <body> so it can never be
+// clipped by card overflow or stacked behind sibling divs. Flips below the
+// element near the top of the viewport.
+const Tip = ({ tip, children, className }) => {
+  const ref = useRef(null);
+  const [pos, setPos] = useState(null);
+  const show = () => {
+    const r = ref.current?.getBoundingClientRect();
+    if (!r) return;
+    const below = r.top < 130;
+    setPos({
+      x: Math.min(Math.max(r.left + r.width / 2, 155), window.innerWidth - 155),
+      y: below ? r.bottom : r.top,
+      below
+    });
+  };
+  if (!tip) return children;
+  return (
+    <span ref={ref} onMouseEnter={show} onMouseLeave={() => setPos(null)} onClick={() => setPos(null)} className={className || 'inline-flex'}>
+      {children}
+      {pos && createPortal(
+        <div className={`tip-pop ${pos.below ? 'tip-below' : ''}`} style={{ left: pos.x, top: pos.y }}>{tip}</div>,
+        document.body
+      )}
+    </span>
+  );
+};
+
+const GlassCard = ({ children, className = "", title, icon: Icon, value, trend, trendValue, subtext, onClick, isActive, noPadding, quiet, headerRight }) => (
   <div 
     onClick={onClick}
     className={`
@@ -91,13 +120,14 @@ const GlassCard = ({ children, className = "", title, icon: Icon, value, trend, 
     <div className={`relative z-10 flex-1 flex flex-col ${noPadding ? 'p-0' : 'p-5'}`}>
       {(title || value) && (
         <div className={`flex flex-col flex-1 ${noPadding ? 'p-5 pb-0' : ''}`}>
-          <div className={`flex items-start justify-between ${trend ? 'mb-2' : 'mb-4'}`}>
-            <div className="flex items-start space-x-2.5 text-slate-400">
+          <div className={`flex items-start justify-between gap-3 ${trend ? 'mb-2' : 'mb-4'}`}>
+            <div className="flex items-start space-x-2.5 text-slate-400 min-w-0">
               {Icon && <Icon size={16} className={`mt-0.5 shrink-0 ${isActive ? "text-cyan-200" : "text-cyan-400"}`} />}
               <span className={`text-[10px] font-bold tracking-[0.22em] uppercase leading-[1.5] ${value !== undefined ? 'w-min whitespace-normal' : ''} ${isActive ? 'text-cyan-100' : ''}`}>
                 {title}
               </span>
             </div>
+            {headerRight && <div className="shrink-0 flex items-center gap-2 relative z-20">{headerRight}</div>}
           </div>
           
           {trend && (
@@ -801,20 +831,11 @@ const CohortExplorer = ({ csvData }) => {
         title: cal
       };
     }
-    if (gridMode === 'percentage') {
-      const t = Math.min(val / 5, 1);
-      return {
-        className: 'text-white border border-white/10',
-        style: {
-          background: `linear-gradient(135deg, rgba(var(--cell-a), ${0.06 + t * 0.30}), rgba(var(--cell-b), ${0.04 + t * 0.26}))`,
-          boxShadow: t > 0.65 ? '0 0 14px -4px rgba(var(--cell-a), 0.45)' : 'none'
-        },
-        title: undefined
-      };
-    }
-    if (diff > 0) return { className: 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/25', style: {}, title: undefined };
-    if (diff === 0) return { className: 'bg-white/5 text-slate-400', style: {}, title: undefined };
-    return { className: 'bg-slate-700/30 text-slate-400', style: {}, title: undefined };
+    // Movement colouring: green = grew vs previous month, light red = fell,
+    // neutral = no change. Applies to both Volume and Retention % modes.
+    if (diff > 0) return { className: 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/25', style: {}, title: 'Grew vs previous month' };
+    if (diff < 0) return { className: 'bg-rose-500/15 text-rose-300 border border-rose-500/30', style: {}, title: 'Fell vs previous month' };
+    return { className: 'bg-white/5 text-slate-400 border border-white/10', style: {}, title: 'No change vs previous month' };
   };
 
   const copyGridCSV = () => {
@@ -923,21 +944,26 @@ const CohortExplorer = ({ csvData }) => {
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
              <div className="flex flex-col sm:flex-row gap-4 w-full md:w-auto items-stretch sm:items-center">
                 <div className="flex bg-white/5 p-1 rounded-xl border border-white/10 shrink-0">
+                    <Tip tip="Pick ONE segment and draw one line per monthly cohort. Answers: are the users we acquire each month getting better or worse?">
                     <button 
                         onClick={() => { setPivotAxis('cohorts'); setHiddenSeries(new Set()); }}
                         className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${pivotAxis === 'cohorts' ? 'bg-cyan-500/20 text-cyan-400 shadow-sm' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}
                     >
                         By Cohort
                     </button>
+                    </Tip>
+                    <Tip tip="Pick ONE cohort month and draw one line per segment. Answers: which page / source / campaign produced the best users that month?">
                     <button 
                         onClick={() => { setPivotAxis('segments'); setHiddenSeries(new Set()); }}
                         className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${pivotAxis === 'segments' ? 'bg-cyan-500/20 text-cyan-400 shadow-sm' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}
                     >
                         Compare Segments
                     </button>
+                    </Tip>
                 </div>
 
-                <div className="relative group w-full md:w-96">
+                <Tip className="block w-full md:w-96" tip={pivotAxis === 'cohorts' ? 'Choose which segment to analyse. "All Traffic" = the whole site. Every line on the chart is then one monthly cohort of this segment.' : 'Choose which cohort month to break down. Every line on the chart is then one segment of users acquired in this month.'}>
+                <div className="relative group w-full">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                       <Filter size={16} className="text-slate-400" />
                     </div>
@@ -970,21 +996,26 @@ const CohortExplorer = ({ csvData }) => {
                       <ChevronRight size={16} className="text-slate-400 rotate-90" />
                     </div>
                 </div>
+                </Tip>
              </div>
 
               <div className="flex bg-white/5 p-1 rounded-xl border border-white/10">
+                 <Tip tip="Running total of purchases since each cohort's first visit. Rising = value still accruing; flat = the cohort has gone quiet.">
                  <button 
                     onClick={() => setChartMode('area')}
                     className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${chartMode === 'area' ? 'bg-cyan-500/20 text-cyan-400 shadow-sm' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}
                  >
                     <TrendingUp size={16} /> Cumulative
                  </button>
+                 </Tip>
+                 <Tip tip="NEW purchases added in each month, not the running total. Shows exactly when buying happens — most segments spike at M0-M1 then trail.">
                  <button 
                     onClick={() => setChartMode('line')}
                     className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${chartMode === 'line' ? 'bg-cyan-500/20 text-cyan-400 shadow-sm' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}
                  >
                     <Activity size={16} /> Incremental
                  </button>
+                 </Tip>
               </div>
         </div>
 
@@ -992,28 +1023,46 @@ const CohortExplorer = ({ csvData }) => {
         {chartMode === 'area' && (
           <div className="flex flex-wrap items-center gap-3">
               <div className="flex bg-white/5 p-1 rounded-xl border border-white/10 text-xs">
+                  <Tip tip="Raw purchase counts. Good for sizing volume; unfair for comparing cohorts or segments of different sizes.">
                   <button onClick={() => setValueMode('absolute')} className={`px-3 py-1.5 rounded font-semibold transition-all ${valueMode === 'absolute' ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-400 hover:text-slate-200'}`}>Absolute</button>
+                  </Tip>
+                  <Tip tip="Purchases ÷ cohort visitors. THE fair comparison — a small high-quality segment beats a big mediocre one here.">
                   <button onClick={() => setValueMode('perUser')} className={`px-3 py-1.5 rounded font-semibold transition-all ${valueMode === 'perUser' ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-400 hover:text-slate-200'}`}>Per User</button>
-                  <button onClick={() => setValueMode('indexed')} className={`px-3 py-1.5 rounded font-semibold transition-all ${valueMode === 'indexed' ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-400 hover:text-slate-200'}`} title="Maturation view: every series indexed to its own Month 0 = 100, so only curve shape differs">Indexed</button>
+                  </Tip>
+                  <Tip tip="Maturation view: every line starts at 100 (its own Month 0). Size disappears — only SHAPE remains. Steeper = users keep buying after acquisition; flat = one-and-done.">
+                  <button onClick={() => setValueMode('indexed')} className={`px-3 py-1.5 rounded font-semibold transition-all ${valueMode === 'indexed' ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-400 hover:text-slate-200'}`}>Indexed</button>
+                  </Tip>
               </div>
               {pivotAxis === 'cohorts' && (
                 <div className="flex bg-white/5 p-1 rounded-xl border border-white/10 text-xs">
+                    <Tip tip="X-axis = months since first visit. Compares cohorts at the SAME AGE — the right lens for 'do our users age well?'">
                     <button onClick={() => setXMode('maturity')} className={`px-3 py-1.5 rounded font-semibold transition-all ${xMode === 'maturity' ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-400 hover:text-slate-200'}`}>Maturity axis</button>
-                    <button onClick={() => setXMode('calendar')} className={`px-3 py-1.5 rounded font-semibold transition-all ${xMode === 'calendar' ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-400 hover:text-slate-200'}`} title="Align cohorts in real time to expose seasonality and site-wide events">Calendar axis</button>
+                    </Tip>
+                    <Tip tip="X-axis = real calendar months. All cohorts aligned in time — seasonality, promos and site changes appear as bumps every line shares. Annotation flags from Purchase Velocity show here.">
+                    <button onClick={() => setXMode('calendar')} className={`px-3 py-1.5 rounded font-semibold transition-all ${xMode === 'calendar' ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-400 hover:text-slate-200'}`}>Calendar axis</button>
+                    </Tip>
                 </div>
               )}
               <div className="flex bg-white/5 p-1 rounded-xl border border-white/10 text-xs">
+                  <Tip tip="All series on one chart. Best under ~8 lines.">
                   <button onClick={() => setLayout('overlay')} className={`px-3 py-1.5 rounded font-semibold transition-all ${layout === 'overlay' ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-400 hover:text-slate-200'}`}>Overlay</button>
-                  <button onClick={() => setLayout('multiples')} className={`px-3 py-1.5 rounded font-semibold transition-all ${layout === 'multiples' ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-400 hover:text-slate-200'}`} title="Small multiples: one mini-chart per series, shared scale">Multiples</button>
+                  </Tip>
+                  <Tip tip="One mini-chart per series on a SHARED scale. With many series this beats spaghetti — your eye compares shapes instantly.">
+                  <button onClick={() => setLayout('multiples')} className={`px-3 py-1.5 rounded font-semibold transition-all ${layout === 'multiples' ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-400 hover:text-slate-200'}`}>Multiples</button>
+                  </Tip>
               </div>
               {pivotAxis === 'cohorts' && xMode === 'maturity' && layout === 'overlay' && (
                 <>
-                  <button onClick={() => setShowBenchmark(!showBenchmark)} className={`px-3 py-2 rounded-lg text-xs font-semibold border transition-all ${showBenchmark ? 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30' : 'bg-white/5 text-slate-400 border-white/10 hover:text-white'}`} title="Shaded p25–p75 corridor + median across mature cohorts — is this cohort normal?">
+                  <Tip tip="Shaded corridor = the middle 50% (p25-p75) of your MATURE cohorts; dotted line = their median. Any cohort inside the band is normal. Above = genuinely better acquisition, below = investigate.">
+                  <button onClick={() => setShowBenchmark(!showBenchmark)} className={`px-3 py-2 rounded-lg text-xs font-semibold border transition-all ${showBenchmark ? 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30' : 'bg-white/5 text-slate-400 border-white/10 hover:text-white'}`}>
                     Benchmark band
                   </button>
-                  <button onClick={() => setShowProjection(!showProjection)} className={`px-3 py-2 rounded-lg text-xs font-semibold border transition-all ${showProjection ? 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30' : 'bg-white/5 text-slate-400 border-white/10 hover:text-white'}`} title="Dashed continuation of young cohorts using median multipliers from mature cohorts, with p25–p75 band">
+                  </Tip>
+                  <Tip tip="Dashed continuation of young cohorts, using how your mature cohorts multiplied from the same age. Shaded = p25-p75 range. Kills the false 'cliff' at the right edge — recent cohorts aren't failing, they're just young.">
+                  <button onClick={() => setShowProjection(!showProjection)} className={`px-3 py-2 rounded-lg text-xs font-semibold border transition-all ${showProjection ? 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30' : 'bg-white/5 text-slate-400 border-white/10 hover:text-white'}`}>
                     Projections
                   </button>
+                  </Tip>
                 </>
               )}
           </div>
@@ -1023,18 +1072,25 @@ const CohortExplorer = ({ csvData }) => {
             (chartMode === 'area' ? 'Cumulative LTV Curve' : 'Incremental Growth (New Purchases)') +
             (pivotAxis === 'segments' ? ` — by ${dimensionLabel} (${selectedCohort || ''})` : '') +
             (valueMode === 'indexed' && chartMode === 'area' ? ' — Indexed (M0 = 100)' : '')
-        }>
-            <div className="absolute top-5 right-5 z-20 flex items-center gap-2">
+        } headerRight={
+            <>
                {chartMode === 'line' && (
                   <div className="flex bg-[#0e0e12] p-1 rounded-lg border border-white/10 text-xs shadow-lg">
+                      <Tip tip="Normal scale — compares sizes.">
                       <button onClick={() => setIsLogScale(false)} className={`px-3 py-1.5 rounded transition-all font-semibold ${!isLogScale ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-400 hover:text-slate-200'}`}>Linear</button>
+                      </Tip>
+                      <Tip tip="Log scale — compares GROWTH RATES. A straight line means constant % change; big and small series become comparable.">
                       <button onClick={() => setIsLogScale(true)} className={`px-3 py-1.5 rounded transition-all font-semibold ${isLogScale ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-400 hover:text-slate-200'}`}>Logarithmic</button>
+                      </Tip>
                   </div>
                )}
-               <button onClick={() => exportChartPNG(chartWrapRef.current, 'cohortsuite_chart')} className="p-2 rounded-lg bg-[#0e0e12] border border-white/10 text-slate-400 hover:text-cyan-300 transition-colors" title="Export chart as PNG">
+               <Tip tip="Download this chart as a PNG — drop it straight into a report or deck.">
+               <button onClick={() => exportChartPNG(chartWrapRef.current, 'cohortsuite_chart')} aria-label="Export chart as PNG" className="p-2 rounded-lg bg-[#0e0e12] border border-white/10 text-slate-400 hover:text-cyan-300 transition-colors">
                   <Camera size={14} />
                </button>
-            </div>
+               </Tip>
+            </>
+        }>
             
             <div ref={chartWrapRef} className="h-full w-full">
             {layout === 'multiples' && chartMode === 'area' ? (
@@ -1129,17 +1185,27 @@ const CohortExplorer = ({ csvData }) => {
                     )}
                     {pivotAxis === 'cohorts' && (
                         <div className="flex bg-slate-900/50 p-1 rounded-lg border border-white/10">
+                            <Tip tip="Cells coloured by movement: green = grew vs previous month, red = fell, grey = flat.">
                             <button onClick={() => setGridShade('performance')} className={`px-3 py-1 rounded text-xs font-medium transition-all ${gridShade === 'performance' ? 'bg-cyan-500/20 text-cyan-400' : 'text-slate-400 hover:text-white'}`}>Performance</button>
-                            <button onClick={() => setGridShade('calendar')} className={`px-3 py-1 rounded text-xs font-medium transition-all ${gridShade === 'calendar' ? 'bg-cyan-500/20 text-cyan-400' : 'text-slate-400 hover:text-white'}`} title="Cells sharing a calendar month share a colour — diagonals reveal period effects (promos, site changes), rows reveal cohort effects">Calendar</button>
+                            </Tip>
+                            <Tip tip="Cells in the same REAL month share a colour (hover a cell to see which). A glowing diagonal = something hit everyone that month (promo, site change, season). A standout row = that cohort's users were simply better.">
+                            <button onClick={() => setGridShade('calendar')} className={`px-3 py-1 rounded text-xs font-medium transition-all ${gridShade === 'calendar' ? 'bg-cyan-500/20 text-cyan-400' : 'text-slate-400 hover:text-white'}`}>Calendar</button>
+                            </Tip>
                         </div>
                     )}
                     <div className="flex bg-slate-900/50 p-1 rounded-lg border border-white/10">
+                        <Tip tip="Cumulative purchase counts per month since acquisition.">
                         <button onClick={() => setGridMode('cumulative')} className={`px-3 py-1 rounded text-xs font-medium transition-all ${gridMode === 'cumulative' ? 'bg-cyan-500/20 text-cyan-400' : 'text-slate-400 hover:text-white'}`}>Volume</button>
+                        </Tip>
+                        <Tip tip="Cumulative purchases ÷ cohort visitors — the % of each cohort that has converted by month N. Green = still climbing, grey = gone quiet.">
                         <button onClick={() => setGridMode('percentage')} className={`px-3 py-1 rounded text-xs font-medium transition-all ${gridMode === 'percentage' ? 'bg-cyan-500/20 text-cyan-400' : 'text-slate-400 hover:text-white'}`}>Retention %</button>
+                        </Tip>
                     </div>
-                    <button onClick={copyGridCSV} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${copied ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' : 'bg-white/5 text-slate-400 border-white/10 hover:text-white'}`} title="Copy this grid as CSV">
+                    <Tip tip="Copy this grid as CSV — paste straight into Sheets or Excel.">
+                    <button onClick={copyGridCSV} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${copied ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' : 'bg-white/5 text-slate-400 border-white/10 hover:text-white'}`}>
                         <Copy size={12} /> {copied ? 'Copied' : 'Copy CSV'}
                     </button>
+                    </Tip>
                 </div>
             </div>
             <div className="overflow-x-auto">
@@ -1148,7 +1214,7 @@ const CohortExplorer = ({ csvData }) => {
                         <tr className="bg-white/5 text-xs text-slate-400 uppercase tracking-wider">
                             <th className="p-4 border-b border-white/10 sticky left-0 bg-[#05070b] z-10">{pivotAxis === 'segments' ? dimensionLabel : 'Cohort'}</th>
                             <th className="p-4 border-b border-white/10 text-right">Visitors</th>
-                            {[...Array(6)].map((_, i) => <th key={i} className="p-4 border-b border-white/10 text-center">M{i}</th>)}
+                            {[...Array(6)].map((_, i) => <th key={i} className="p-4 border-b border-white/10 text-center"><Tip tip={i === 0 ? 'Month 0 = the month users first arrived.' : `${i} month${i > 1 ? 's' : ''} after first visit.`}><span className="cursor-help">M{i}</span></Tip></th>)}
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-white/5">
@@ -1220,16 +1286,19 @@ const CompareLab = ({ datasets, activeId, onSelectDataset }) => {
     return pts;
   }, [A, B, matchedAge]);
 
-  const DeltaChip = ({ label, a, b, fmt, higherIsBetter = true }) => {
+  const DeltaChip = ({ label, a, b, fmt, higherIsBetter = true, tip }) => {
     if (a === null || b === null || a === undefined || b === undefined) return (
-      <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+      <Tip tip={tip} className="block">
+      <div className="rounded-xl border border-white/10 bg-white/5 p-3 cursor-help">
         <div className="text-[9px] uppercase tracking-[0.18em] text-slate-500 mb-1">{label}</div>
         <div className="text-xs text-slate-500">insufficient data</div>
       </div>
+      </Tip>
     );
     const winner = a === b ? null : (a > b) === higherIsBetter ? 'A' : 'B';
     return (
-      <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+      <Tip tip={tip} className="block">
+      <div className="rounded-xl border border-white/10 bg-white/5 p-3 cursor-help">
         <div className="text-[9px] uppercase tracking-[0.18em] text-slate-500 mb-1">{label}</div>
         <div className="flex items-baseline gap-2 text-sm data-num">
           <span className={winner === 'A' ? 'text-emerald-300 font-bold' : 'text-slate-300'}>{fmt(a)}</span>
@@ -1237,6 +1306,7 @@ const CompareLab = ({ datasets, activeId, onSelectDataset }) => {
           <span className={winner === 'B' ? 'text-emerald-300 font-bold' : 'text-slate-300'}>{fmt(b)}</span>
         </div>
       </div>
+      </Tip>
     );
   };
 
@@ -1276,36 +1346,45 @@ const CompareLab = ({ datasets, activeId, onSelectDataset }) => {
             <div className="flex flex-col lg:flex-row gap-6 mt-2 h-full">
                 <div className="lg:w-[340px] shrink-0 space-y-3">
                     {[{ v: segA, set: setSegA, tag: 'A', color: ramp[0] }, { v: segB, set: setSegB, tag: 'B', color: ramp[1] }].map(({ v, set, tag, color }) => (
-                        <div key={tag} className="flex items-center gap-2">
+                        <Tip key={tag} className="flex items-center gap-2" tip={`Contender ${tag}. All metrics below compare A and B only at ages BOTH have reached — never a 14-month-old segment against a 3-month-old one.`}>
+                        <div className="flex items-center gap-2 w-full">
                             <span className="w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-bold shrink-0" style={{ background: `${color}22`, color }}>{tag}</span>
                             <select value={v || ''} onChange={(e) => set(e.target.value)} className="appearance-none flex-1 bg-white/5 border border-white/10 text-white rounded-xl px-3 py-2.5 text-xs font-medium focus:outline-none focus:border-cyan-500/50 cursor-pointer hover:bg-white/10 transition-colors">
                                 {realSegs.map(s => <option key={s.path} value={s.path} className="bg-slate-900 text-slate-200">{s.label}</option>)}
                             </select>
                         </div>
+                        </Tip>
                     ))}
                     {A && B && (
                         <div className="grid grid-cols-1 gap-2 pt-2">
-                            <DeltaChip label="M0 conversion" a={A.m0Conv} b={B.m0Conv} fmt={(v) => v.toFixed(2) + '%'} />
-                            <DeltaChip label={`Value / user @ M${matchedAge}`} a={A.pu[matchedAge]} b={B.pu[matchedAge]} fmt={(v) => v?.toFixed(4)} />
-                            <DeltaChip label="Tail ratio (M3 ÷ M0)" a={A.tail} b={B.tail} fmt={(v) => v.toFixed(2) + '×'} />
-                            <DeltaChip label="Fragility (CV of M0 conv)" a={A.fragility} b={B.fragility} fmt={(v) => v.toFixed(0) + '%'} higherIsBetter={false} />
-                            <DeltaChip label="Payback month (AOV/CAC below)" a={payback(A, getCfg(aovConfig, A.path), getCfg(cacConfig, A.path))} b={payback(B, getCfg(aovConfig, B.path), getCfg(cacConfig, B.path))} fmt={(v) => 'M' + v} higherIsBetter={false} />
+                            <DeltaChip label="M0 conversion" a={A.m0Conv} b={B.m0Conv} fmt={(v) => v.toFixed(2) + '%'} tip="% of each segment's visitors who purchase in their FIRST month. Green = winner. The instant-quality signal." />
+                            <DeltaChip label={`Value / user @ M${matchedAge}`} a={A.pu[matchedAge]} b={B.pu[matchedAge]} fmt={(v) => v?.toFixed(4)} tip={`Cumulative purchases per visitor after ${matchedAge} months — the fairest single number for 'which segment produces more valuable users'.`} />
+                            <DeltaChip label="Tail ratio (M3 ÷ M0)" a={A.tail} b={B.tail} fmt={(v) => v.toFixed(2) + '×'} tip="Value at Month 3 ÷ value at Month 0. 1.0× = one-and-done buyers; 1.3×+ = the segment keeps compounding after acquisition. High tail justifies higher CAC." />
+                            <DeltaChip label="Fragility (CV of M0 conv)" a={A.fragility} b={B.fragility} fmt={(v) => v.toFixed(0) + '%'} higherIsBetter={false} tip="How much M0 conversion swings between cohorts (coefficient of variation). LOWER is better — high fragility means don't scale this segment on the back of one good month." />
+                            <DeltaChip label="Payback month (AOV/CAC below)" a={payback(A, getCfg(aovConfig, A.path), getCfg(cacConfig, A.path))} b={payback(B, getCfg(aovConfig, B.path), getCfg(cacConfig, B.path))} fmt={(v) => 'M' + v} higherIsBetter={false} tip="First month where value/user × AOV covers CAC (edit both in the Economics table below). LOWER is better. 'Insufficient data' = CAC not recovered within the observed window at current settings." />
                         </div>
                     )}
                 </div>
-                <div className="flex-1 min-h-[300px]">
-                    <ResponsiveContainer width="100%" height="100%" className="glow-stroke-soft">
-                        <ComposedChart data={duelData} margin={{ top: 10, right: 10, left: 0, bottom: 10 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
-                            <XAxis dataKey="index" stroke="var(--chart-axis)" tick={{ fill: 'var(--chart-tick)' }} />
-                            <YAxis stroke="var(--chart-axis)" tick={{ fill: 'var(--chart-tick)' }} tickFormatter={(v) => v.toFixed(3)} />
-                            <Tooltip content={<CustomTooltip />} />
-                            <Legend wrapperStyle={{ fontSize: '12px' }} />
-                            {A && <Line type="monotone" dataKey={A.label} stroke={ramp[0]} strokeWidth={3} dot={false} activeDot={{ r: 5 }} />}
-                            {B && <Line type="monotone" dataKey={B.label} stroke={ramp[1]} strokeWidth={3} dot={false} activeDot={{ r: 5 }} />}
-                        </ComposedChart>
-                    </ResponsiveContainer>
-                    <div className="text-[10px] text-slate-500 text-center -mt-1">Per-user cumulative value · both segments clipped to the age both have reached</div>
+                <div className="flex-1 min-w-0">
+                    {/* Fixed height: ResponsiveContainer at 100% of an auto-height
+                        parent re-measures itself and grows forever. */}
+                    <div className="h-[340px] w-full">
+                        <ResponsiveContainer width="100%" height="100%" className="glow-stroke-soft">
+                            <ComposedChart data={duelData} margin={{ top: 10, right: 10, left: 0, bottom: 10 }}>
+                                <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
+                                <XAxis dataKey="index" stroke="var(--chart-axis)" tick={{ fill: 'var(--chart-tick)' }} label={{ value: 'MONTHS SINCE FIRST VISIT', position: 'insideBottom', offset: -5, fill: 'var(--chart-axis)', fontSize: 9, fontWeight: 'bold', letterSpacing: '0.15em' }} />
+                                <YAxis stroke="var(--chart-axis)" tick={{ fill: 'var(--chart-tick)' }} tickFormatter={(v) => v.toFixed(3)} domain={[0, 'auto']} />
+                                <Tooltip content={<CustomTooltip />} />
+                                {A && <Line type="monotone" dataKey={A.label} stroke={ramp[0]} strokeWidth={3} dot={false} activeDot={{ r: 5 }} isAnimationActive={false} />}
+                                {B && <Line type="monotone" dataKey={B.label} stroke={ramp[1]} strokeWidth={3} dot={false} activeDot={{ r: 5 }} isAnimationActive={false} />}
+                            </ComposedChart>
+                        </ResponsiveContainer>
+                    </div>
+                    <div className="flex items-center justify-center gap-4 mt-2 text-[11px]">
+                        {A && <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ background: ramp[0] }} /><span className="text-slate-300 font-medium">{A.label}</span></span>}
+                        {B && <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ background: ramp[1] }} /><span className="text-slate-300 font-medium">{B.label}</span></span>}
+                    </div>
+                    <div className="text-[10px] text-slate-500 text-center mt-1">Per-user cumulative value · both segments clipped to the age both have reached</div>
                 </div>
             </div>
         </GlassCard>
@@ -1321,14 +1400,14 @@ const CompareLab = ({ datasets, activeId, onSelectDataset }) => {
                     <thead>
                         <tr className="bg-white/5 text-xs text-slate-400 uppercase tracking-wider">
                             <th className="p-4 border-b border-white/10">{dimensionLabel}</th>
-                            <th className="p-4 border-b border-white/10 text-right">Visitors</th>
-                            <th className="p-4 border-b border-white/10 text-right">M0 Conv</th>
-                            <th className="p-4 border-b border-white/10 text-right" title="Weighted per-user cumulative value at the segment's max observed age">Value/User</th>
-                            <th className="p-4 border-b border-white/10 text-right">AOV £</th>
-                            <th className="p-4 border-b border-white/10 text-right">CAC £</th>
-                            <th className="p-4 border-b border-white/10 text-center">Payback</th>
-                            <th className="p-4 border-b border-white/10 text-center" title="M3 cumulative ÷ M0 — does this segment compound after acquisition?">Tail M3/M0</th>
-                            <th className="p-4 border-b border-white/10 text-center" title="Coefficient of variation of M0 conversion across cohorts — high = don't scale on one good month">Fragility</th>
+                            <th className="p-4 border-b border-white/10 text-right"><Tip tip="Total first-touch visitors across all cohorts of this segment."><span className="cursor-help">Visitors</span></Tip></th>
+                            <th className="p-4 border-b border-white/10 text-right"><Tip tip="% of visitors purchasing in their first month (visitor-weighted across cohorts)."><span className="cursor-help">M0 Conv</span></Tip></th>
+                            <th className="p-4 border-b border-white/10 text-right"><Tip tip="Cumulative purchases per visitor at this segment's oldest observed age. Multiply by AOV for £ value per visitor."><span className="cursor-help">Value/User</span></Tip></th>
+                            <th className="p-4 border-b border-white/10 text-right"><Tip tip="Average order value for this segment. Editable — stored in this browser only."><span className="cursor-help">AOV £</span></Tip></th>
+                            <th className="p-4 border-b border-white/10 text-right"><Tip tip="Customer acquisition cost — what you pay to land one visitor/booking from this segment. Editable — use your real blended or per-campaign CPA."><span className="cursor-help">CAC £</span></Tip></th>
+                            <th className="p-4 border-b border-white/10 text-center"><Tip tip="First month where value/user × AOV ≥ CAC. M0-M1 = self-funding growth; '—' = never recovers within the observed window at these settings."><span className="cursor-help">Payback</span></Tip></th>
+                            <th className="p-4 border-b border-white/10 text-center"><Tip tip="Month-3 value ÷ Month-0 value. 1.0× = one-and-done; higher = the segment keeps buying after acquisition."><span className="cursor-help">Tail M3/M0</span></Tip></th>
+                            <th className="p-4 border-b border-white/10 text-center"><Tip tip="How much M0 conversion swings cohort-to-cohort. Green <15% = stable, amber = watch, red >35% = too volatile to scale on one good month."><span className="cursor-help">Fragility</span></Tip></th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-white/5">
@@ -1382,8 +1461,8 @@ const CompareLab = ({ datasets, activeId, onSelectDataset }) => {
                         <tr className="bg-white/5 text-xs text-slate-400 uppercase tracking-wider">
                             <th className="p-4 border-b border-white/10">Dataset</th>
                             <th className="p-4 border-b border-white/10">Dimension</th>
-                            <th className="p-4 border-b border-white/10 text-center">Segments</th>
-                            <th className="p-4 border-b border-white/10 text-center">Separation</th>
+                            <th className="p-4 border-b border-white/10 text-center"><Tip tip="Segments with 50+ visitors and at least one purchase — smaller ones are excluded as noise."><span className="cursor-help">Segments</span></Tip></th>
+                            <th className="p-4 border-b border-white/10 text-center"><Tip tip="Visitor-weighted value of the TOP half of segments ÷ the BOTTOM half. 1.0× = this dimension doesn't matter; 3×+ = optimising by this dimension moves real money. Rank your exports here to decide what to segment by."><span className="cursor-help">Separation</span></Tip></th>
                             <th className="p-4 border-b border-white/10">Strongest Segment</th>
                             <th className="p-4 border-b border-white/10">Weakest Segment</th>
                         </tr>
@@ -1643,22 +1722,27 @@ const VelocityExplorer = ({ csvData }) => {
             </h2>
             <div className="flex items-center gap-3 flex-wrap">
                 {partialMonth && (
+                    <Tip tip={`${partialMonth} isn't finished yet, so its purchases and conversion are incomplete. Excluded from KPI cards by default so run-rates aren't understated. Click to include it anyway.`}>
                     <button 
                         onClick={() => setExcludePartial(!excludePartial)}
                         className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium border transition-all ${excludePartial ? 'bg-amber-500/10 text-amber-300 border-amber-500/30' : 'bg-white/5 text-slate-400 border-white/10 hover:text-white'}`}
-                        title={`${partialMonth} is still in progress — its purchases and conversion are incomplete`}
                     >
                         <AlertCircle size={14} />
                         {excludePartial ? `Excluding partial ${partialMonth}` : `Including partial ${partialMonth}`}
                     </button>
+                    </Tip>
                 )}
                 <div className="flex bg-[#0e0e12] p-1 rounded-xl border border-white/10">
+                    <Tip tip="Whole-account run-rate: purchases per day, monthly conversion, and traffic vs purchases over time.">
                     <button onClick={() => setView('overview')} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${view === 'overview' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30' : 'text-slate-400 hover:text-white'}`}>
                         <Activity size={16} /> Overview
                     </button>
+                    </Tip>
+                    <Tip tip="League table of every segment: total volume, conversion, monthly trend, and revenue estimate with editable AOV.">
                     <button onClick={() => setView('paths')} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${view === 'paths' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30' : 'text-slate-400 hover:text-white'}`}>
                         <MapIcon size={16} /> {isPathDimension ? 'Page Paths' : 'Segments'}
                     </button>
+                    </Tip>
                 </div>
             </div>
          </div>
@@ -1674,10 +1758,13 @@ const VelocityExplorer = ({ csvData }) => {
                 </div>
 
                 {/* Velocity vs Traffic Chart - Moved horizontally between cards and table */}
-                <GlassCard title="Purchase Velocity vs Traffic" icon={Filter} className="h-[400px]">
-                    <button onClick={() => exportChartPNG(velocityChartRef.current, 'cohortsuite_velocity')} className="absolute top-5 right-5 z-20 p-2 rounded-lg bg-[#0e0e12] border border-white/10 text-slate-400 hover:text-cyan-300 transition-colors" title="Export chart as PNG">
+                <GlassCard title="Purchase Velocity vs Traffic" icon={Filter} className="h-[400px]" headerRight={
+                    <Tip tip="Download this chart as a PNG for reports.">
+                    <button onClick={() => exportChartPNG(velocityChartRef.current, 'cohortsuite_velocity')} aria-label="Export chart as PNG" className="p-2 rounded-lg bg-[#0e0e12] border border-white/10 text-slate-400 hover:text-cyan-300 transition-colors">
                         <Camera size={14} />
                     </button>
+                    </Tip>
+                }>
                     <div className="h-full w-full pt-4" ref={velocityChartRef}>
                         <ResponsiveContainer width="100%" height="100%">
                             <ComposedChart data={overallData}>
