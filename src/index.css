@@ -484,8 +484,11 @@ input[type="month"] {
 [data-theme="light"] input[type="month"] {
   color-scheme: light;
 }
-input[type="month"].month-empty:not(:focus) {
-  color: transparent;
+/* Chrome renders the -- -- segments in a shadow-DOM wrapper that ignores
+   the input's color; hide the wrapper itself when empty so only our
+   "Month & Year" label shows. */
+input[type="month"].month-empty:not(:focus)::-webkit-datetime-edit {
+  opacity: 0;
 }
 input[type="month"].month-empty:not(:focus)::-webkit-calendar-picker-indicator {
   opacity: 0.6;
@@ -501,4 +504,27 @@ input[type="month"].month-empty:not(:focus)::-webkit-calendar-picker-indicator {
   --cal-a: 124, 58, 237;
   --cal-b: 8, 145, 178;
   --cal-alpha: 0.16;
+}
+
+
+/* ============================================================
+   UNIFORM NUMERALS — every number in the app renders in
+   JetBrains Mono: chart axis ticks, labels, reference lines,
+   tables, KPIs. One numeric voice everywhere.
+   ============================================================ */
+.recharts-cartesian-axis-tick-value,
+.recharts-cartesian-axis-tick-value tspan,
+.recharts-label,
+.recharts-label tspan,
+.recharts-reference-line text,
+.recharts-polar-angle-axis-tick-value {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+.data-num,
+.font-mono,
+input[type="number"],
+input[type="month"] {
+  font-variant-numeric: tabular-nums;
 }
