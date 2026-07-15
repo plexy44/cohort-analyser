@@ -266,115 +266,147 @@ const DataIngestion = ({ onAdd, datasets, activeId, onSelect, onRemove, onRename
   const [isProcessing, setIsProcessing] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [draftName, setDraftName] = useState('');
+  const [notice, setNotice] = useState(null);
 
   const processData = (text, fileName) => {
     setIsProcessing(true);
+    setNotice(null);
     try {
       const lines = text.split('\n');
-      const processedRows = [];
-      let validRowCount = 0;
-      let skippedRowCount = 0;
+      const baseName = (fileName || 'Dataset').replace(/\.csv$/i, '');
 
-      // Detect the breakdown dimension from the raw export header row so the
-      // same pipeline handles Page path, First user source/medium, campaign etc.
+      // GA4 prepends a "Segment" column the moment any segment is added to
+      // Segment comparisons, shifting every other column right. We therefore
+      // anchor on the YYYYMMDD-YYYYMMDD date-range column in EVERY row instead
+      // of trusting fixed positions, and read the header only for names.
       let dimensionName = DEFAULT_DIMENSION;
-      const headerLine = lines.find(l => l.trim().startsWith('Monthly cohort'));
+      const headerLine = lines.find(l => l.trim().startsWith('Monthly cohort') || l.trim().startsWith('Segment,'));
+      let headerOffset = 0;
       if (headerLine) {
-        const headerCols = splitCSVLine(headerLine.trim());
-        if (headerCols[2] && headerCols[2].trim()) dimensionName = headerCols[2].trim();
+        const hc = splitCSVLine(headerLine.trim());
+        if ((hc[0] || '').trim() === 'Segment') headerOffset = 1;
+        const dn = hc[headerOffset + 2];
+        if (dn && dn.trim()) dimensionName = dn.trim();
+      }
+
+      const RANGE = /^\d{8}\s*-\s*\d{8}$/;
+      const formatDate = (s) => (!s || s.length !== 8) ? s : `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`;
+
+      const rows = [];
+      let skippedRowCount = 0;
+      let lastSegment = '';
+      const spanDays = [];
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line || line.startsWith('#') || line.startsWith('Monthly cohort') || line.startsWith('Segment,')) { skippedRowCount++; continue; }
+        const cols = splitCSVLine(line);
+        const d = cols.findIndex(c => RANGE.test(String(c).trim()));
+        if (d < 1 || cols.length < d + 5) { skippedRowCount++; continue; }
+        const monthIndex = parseInt(cols[d - 1], 10);
+        if (isNaN(monthIndex)) { skippedRowCount++; continue; }
+
+        // Anything left of the month index is the GA4 segment. GA4 blanks
+        // repeated group values, so carry the last seen segment forward.
+        let segment = '';
+        if (d >= 2) {
+          segment = (cols[d - 2] || '').trim();
+          if (segment) lastSegment = segment;
+          else segment = lastSegment;
+        }
+
+        const [startRaw, endRaw] = String(cols[d]).trim().split('-').map(s => s.trim());
+        const startDate = formatDate(startRaw);
+        const endDate = formatDate(endRaw);
+        const sd = new Date(startDate), ed = new Date(endDate);
+        if (!isNaN(sd) && !isNaN(ed)) spanDays.push((ed - sd) / 86400000);
+
+        let path = (cols[d + 1] || '').trim();
+        if (path === '' || path === 'All Users') path = 'RESERVED_TOTAL';
+
+        const visitors = safeInt(cols[d + 3]);
+        const purchases = safeInt(cols[d + 4]);
+        const rawRate = cols[d + 5];
+        let percentage = '0%';
+        if (rawRate !== undefined && rawRate !== '') {
+          const f = parseFloat(String(rawRate).replace(/[",%]/g, ''));
+          if (!isNaN(f)) percentage = (f * 100).toFixed(2) + '%';
+        }
+
+        rows.push({ segment, monthIndex, startDate, endDate, path, visitors, purchases, percentage });
+      }
+
+      if (!rows.length) {
+        setError('No cohort rows found. Ensure this is a GA4 Cohort exploration export (Technique: Cohort exploration).');
+        setIsProcessing(false);
+        return;
+      }
+
+      // Weekly/daily granularity guard: the calendar maths assumes monthly.
+      const shortSpans = spanDays.filter(x => x <= 10).length;
+      if (spanDays.length && shortSpans / spanDays.length > 0.5) {
+        setError('This export uses WEEKLY or DAILY cohorts. CohortSuite\u2019s calendar maths assumes monthly \u2014 set Cohort granularity to "Monthly" in GA4 and re-export.');
+        setIsProcessing(false);
+        return;
       }
 
       const header = ['Monthly cohort', 'Cohort Start', 'Cohort End', dimensionName, 'Visitors', 'Purchases', 'Percentage']
         .map(toCSVValue).join(',');
 
-      const formatDate = (dateStr) => {
-        if (!dateStr || dateStr.length !== 8) return dateStr;
-        return `${dateStr.slice(0, 4)}-${dateStr.slice(4, 6)}-${dateStr.slice(6, 8)}`;
-      };
-
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].trim();
-        if (!line || line.startsWith('#') || line.startsWith('Monthly cohort')) {
-            skippedRowCount++;
-            continue;
-        }
-
-        const cols = splitCSVLine(line);
-        if (cols.length < 6) {
-            skippedRowCount++;
-            continue;
-        }
-
-        const rawMonthIndex = cols[0];
-        const rawDateRange = cols[1];
-        let rawPath = (cols[2] || '').trim();
-        const rawVisitors = safeInt(cols[4]);
-        const rawPurchases = safeInt(cols[5]);
-        const rawRate = cols[6];
-
-        if (!rawDateRange.includes('-')) {
-            skippedRowCount++;
-            continue;
-        }
-
-        // GA4 emits the cohort total as "All Users" (or a blank dimension
-        // value). Normalise to RESERVED_TOTAL so downstream modules find it
-        // without manual renaming.
-        if (rawPath === '' || rawPath === 'All Users') rawPath = 'RESERVED_TOTAL';
-
-        const [startRaw, endRaw] = rawDateRange.split('-');
-        const startDate = formatDate(startRaw);
-        const endDate = formatDate(endRaw);
-        const monthIndex = parseInt(rawMonthIndex, 10);
-        
-        let percentage = "0%";
-        if (rawRate) {
-            const floatRate = parseFloat(String(rawRate).replace(/[",%]/g, ''));
-            if (!isNaN(floatRate)) {
-                percentage = (floatRate * 100).toFixed(2) + '%';
-            }
-        }
-
-        processedRows.push({
-            monthIndex,
-            startDate,
-            endDate,
-            path: rawPath,
-            visitors: rawVisitors,
-            purchases: rawPurchases,
-            percentage,
-            originalLine: [monthIndex, startDate, endDate, rawPath, rawVisitors, rawPurchases, percentage].map(toCSVValue).join(',')
+      const buildDataset = (subset) => {
+        const sorted = [...subset].sort((a, b) => {
+          const p = a.path.localeCompare(b.path);
+          if (p !== 0) return p;
+          if (a.startDate !== b.startDate) return a.startDate.localeCompare(b.startDate);
+          return a.monthIndex - b.monthIndex;
         });
-        
-        validRowCount++;
-      }
-
-      processedRows.sort((a, b) => {
-        const pathCompare = a.path.localeCompare(b.path);
-        if (pathCompare !== 0) return pathCompare;
-        if (a.startDate !== b.startDate) return a.startDate.localeCompare(b.startDate);
-        return a.monthIndex - b.monthIndex;
-      });
-
-      const finalCSV = [header, ...processedRows.map(row => row.originalLine)].join('\n');
-
-      const newStats = {
-        total: lines.length,
-        valid: validRowCount,
-        skipped: skippedRowCount,
-        dimension: dimensionName,
-        firstDate: processedRows[0]?.startDate,
-        lastDate: processedRows[processedRows.length - 1]?.startDate
+        const csvRows = sorted.map(r =>
+          [r.monthIndex, r.startDate, r.endDate, r.path, r.visitors, r.purchases, r.percentage].map(toCSVValue).join(',')
+        );
+        let minStart = sorted[0].startDate, maxStart = sorted[0].startDate;
+        sorted.forEach(r => {
+          if (r.startDate < minStart) minStart = r.startDate;
+          if (r.startDate > maxStart) maxStart = r.startDate;
+        });
+        return {
+          csv: [header, ...csvRows].join('\n'),
+          stats: {
+            total: lines.length,
+            valid: sorted.length,
+            skipped: skippedRowCount,
+            dimension: dimensionName,
+            firstDate: minStart,
+            lastDate: maxStart,
+            // A cohort range starting mid-month undercounts that month's
+            // visitors and silently inflates its per-user metrics.
+            midMonthStart: minStart && minStart.slice(8, 10) !== '01' ? minStart : null
+          }
+        };
       };
-      
+
+      const segNames = Array.from(new Set(rows.map(r => r.segment).filter(Boolean)));
       setError(null);
-      const baseName = (fileName || 'Dataset').replace(/\.csv$/i, '');
-      onAdd(finalCSV, newStats, baseName);
+
+      if (segNames.length > 1) {
+        // Multi-segment export: auto-split into one dataset per segment —
+        // never sum segments together (that double-counts All Users overlap).
+        // Stay on this tab so the split result and notice are visible.
+        segNames.forEach(sn => {
+          const ds = buildDataset(rows.filter(r => r.segment === sn));
+          onAdd(ds.csv, ds.stats, `${sn} \u2014 ${baseName}`, { stay: true });
+        });
+        setNotice(`Detected ${segNames.length} GA4 segments \u2014 split into ${segNames.length} datasets: ${segNames.join(', ')}.`);
+      } else {
+        const ds = buildDataset(rows);
+        const name = segNames.length === 1 ? `${segNames[0]} \u2014 ${baseName}` : baseName;
+        onAdd(ds.csv, ds.stats, name);
+        if (segNames.length === 1) setNotice(`GA4 segment "${segNames[0]}" detected \u2014 tagged in the dataset name.`);
+      }
       setIsProcessing(false);
 
     } catch (err) {
       console.error(err);
-      setError("Failed to parse file. Ensure it is the standard GA4 Cohort export.");
+      setError('Failed to parse file. Ensure it is the standard GA4 Cohort export.');
       setIsProcessing(false);
     }
   };
@@ -403,7 +435,7 @@ const DataIngestion = ({ onAdd, datasets, activeId, onSelect, onRemove, onRename
     <div className="w-full max-w-3xl mx-auto space-y-8 animate-in fade-in slide-in-from-right-4 duration-500">
       <div className="text-center space-y-4">
         <h2 className="text-3xl font-light text-white">Data <span className="font-bold text-cyan-400">Ingestion</span></h2>
-        <p className="text-slate-400 max-w-lg mx-auto">Upload one or more raw GA4 Cohort Export CSVs — e.g. one broken down by page path and one by first user source/medium. The breakdown dimension is detected automatically.</p>
+        <p className="text-slate-400 max-w-lg mx-auto">Upload raw GA4 Cohort Export CSVs. The breakdown dimension is detected automatically, multi-segment exports are split into one dataset per segment, and everything is saved in this browser — your datasets will still be here next visit.</p>
       </div>
 
       <div className="glass-dropzone p-10 text-center group">
@@ -453,6 +485,11 @@ const DataIngestion = ({ onAdd, datasets, activeId, onSelect, onRemove, onRename
                         >
                             <Pencil size={14} />
                         </button>
+                        {ds.stats.midMonthStart && (
+                            <Tip tip={`The earliest cohort starts on ${ds.stats.midMonthStart} — not the 1st. That month's visitors are undercounted, so its per-user metrics will read HIGH. Re-export with the date range snapped to the 1st.`}>
+                                <span className="text-[9px] px-2 py-1 rounded bg-amber-500/10 text-amber-300 border border-amber-500/25 uppercase tracking-wider shrink-0 cursor-help">Mid-month start</span>
+                            </Tip>
+                        )}
                         {ds.id === activeId && (
                             <span className="text-[9px] px-2 py-1 rounded bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 uppercase tracking-wider shrink-0">Active</span>
                         )}
@@ -481,6 +518,22 @@ const DataIngestion = ({ onAdd, datasets, activeId, onSelect, onRemove, onRename
             <AlertCircle size={18} /> {error}
         </div>
       )}
+
+      {notice && (
+        <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center gap-3 text-emerald-200 text-sm">
+            <CheckCircle size={18} className="shrink-0" /> {notice}
+        </div>
+      )}
+
+      <div className="liquid-glass liquid-glass--quiet p-5 text-left">
+          <div className="text-[10px] font-bold tracking-[0.22em] uppercase text-slate-500 mb-3">GA4 export recipe</div>
+          <p className="text-xs text-slate-400 leading-relaxed">
+              Technique <span className="text-slate-200 font-semibold">Cohort exploration</span> · Inclusion <span className="text-slate-200 font-semibold">First touch</span> · Return criteria <span className="text-slate-200 font-semibold">Any event</span> · Granularity <span className="text-slate-200 font-semibold">Monthly</span> · Calculation <span className="text-slate-200 font-semibold">Cumulative</span> · Values <span className="text-slate-200 font-semibold">Purchases</span> · Rows per dimension <span className="text-slate-200 font-semibold">50+</span> (15 truncates your leaderboard) · Date range snapped to the <span className="text-slate-200 font-semibold">1st of a month</span>.
+          </p>
+          <p className="text-xs text-slate-500 leading-relaxed mt-2">
+              Add ONE segment under Segment comparisons (e.g. Paid traffic) and each segment becomes its own dataset on upload — that's how you emulate a second dimension.
+          </p>
+      </div>
     </div>
   );
 };
@@ -591,6 +644,35 @@ const exportChartPNG = (el, filename) => {
     };
     img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(data)));
   } catch (e) { console.error('PNG export failed', e); }
+};
+
+// Tiny IndexedDB layer: datasets are multi-MB, far beyond localStorage, so
+// they persist here and are restored on mount. All calls fail soft (private
+// browsing etc. just means no persistence).
+const dsStore = {
+  open: () => new Promise((res, rej) => {
+    try {
+      const r = indexedDB.open('cohortsuite_db', 1);
+      r.onupgradeneeded = () => { r.result.createObjectStore('datasets', { keyPath: 'id' }); };
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+    } catch (e) { rej(e); }
+  }),
+  all: () => dsStore.open().then(db => new Promise((res, rej) => {
+    const q = db.transaction('datasets').objectStore('datasets').getAll();
+    q.onsuccess = () => res(q.result || []);
+    q.onerror = () => rej(q.error);
+  })),
+  put: (ds) => dsStore.open().then(db => new Promise((res, rej) => {
+    const q = db.transaction('datasets', 'readwrite').objectStore('datasets').put(ds);
+    q.onsuccess = () => res();
+    q.onerror = () => rej(q.error);
+  })).catch(() => {}),
+  del: (id) => dsStore.open().then(db => new Promise((res, rej) => {
+    const q = db.transaction('datasets', 'readwrite').objectStore('datasets').delete(id);
+    q.onsuccess = () => res();
+    q.onerror = () => rej(q.error);
+  })).catch(() => {})
 };
 
 // Small persisted-config hook (AOV, CAC, annotations share this pattern)
@@ -2107,25 +2189,54 @@ const App = () => {
   }, [theme]);
 
   const handleRenameDataset = (id, name) => {
-    setDatasets(prev => prev.map(d => d.id === id ? { ...d, name } : d));
+    setDatasets(prev => prev.map(d => {
+      if (d.id !== id) return d;
+      const next = { ...d, name };
+      dsStore.put(next);
+      return next;
+    }));
   };
+
+  // Restore persisted datasets on mount; remember the active selection.
+  useEffect(() => {
+    let cancelled = false;
+    dsStore.all().then(list => {
+      if (cancelled || !list.length) return;
+      list.sort((a, b) => (a.addedAt || 0) - (b.addedAt || 0));
+      setDatasets(list);
+      let saved = null;
+      try { saved = localStorage.getItem('cohortsuite_active_ds'); } catch {}
+      setActiveId(list.some(d => d.id === saved) ? saved : list[0].id);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+  useEffect(() => {
+    if (activeId) try { localStorage.setItem('cohortsuite_active_ds', activeId); } catch {}
+  }, [activeId]);
 
   const activeDataset = datasets.find(d => d.id === activeId) || null;
   const csvData = activeDataset?.csv || null;
 
-  const handleAddDataset = (csv, stats, name) => {
+  const handleAddDataset = (csv, stats, name, opts = {}) => {
     const id = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
-    // Disambiguate duplicate names
-    const existingNames = new Set(datasets.map(d => d.name));
-    let finalName = name;
-    let n = 2;
-    while (existingNames.has(finalName)) finalName = `${name} (${n++})`;
-    setDatasets(prev => [...prev, { id, name: finalName, csv, stats }]);
+    const addedAt = Date.now();
+    setDatasets(prev => {
+      // Dedup against the freshest list — segment auto-split adds several
+      // datasets in quick succession.
+      const existingNames = new Set(prev.map(d => d.name));
+      let finalName = name;
+      let n = 2;
+      while (existingNames.has(finalName)) finalName = `${name} (${n++})`;
+      const ds = { id, name: finalName, csv, stats, addedAt };
+      dsStore.put(ds);
+      return [...prev, ds];
+    });
     setActiveId(id);
-    setActiveTab('cohort'); // Auto-switch on success
+    if (!opts.stay) setActiveTab('cohort'); // Auto-switch on success (single upload)
   };
 
   const handleRemoveDataset = (id) => {
+    dsStore.del(id);
     setDatasets(prev => {
       const next = prev.filter(d => d.id !== id);
       if (id === activeId) setActiveId(next[0]?.id || null);
