@@ -279,13 +279,14 @@ const DataIngestion = ({ onAdd, datasets, activeId, onSelect, onRemove, onRename
       // Segment comparisons, shifting every other column right. We therefore
       // anchor on the YYYYMMDD-YYYYMMDD date-range column in EVERY row instead
       // of trusting fixed positions, and read the header only for names.
+      // The breakdown dimension is named in the column immediately after
+      // "Cohort" — wherever GA4 chose to put the Segment column that export.
       let dimensionName = DEFAULT_DIMENSION;
       const headerLine = lines.find(l => l.trim().startsWith('Monthly cohort') || l.trim().startsWith('Segment,'));
-      let headerOffset = 0;
       if (headerLine) {
-        const hc = splitCSVLine(headerLine.trim());
-        if ((hc[0] || '').trim() === 'Segment') headerOffset = 1;
-        const dn = hc[headerOffset + 2];
+        const hc = splitCSVLine(headerLine.trim()).map(c => c.trim());
+        const ci = hc.indexOf('Cohort');
+        const dn = ci >= 0 ? hc[ci + 1] : hc[2];
         if (dn && dn.trim()) dimensionName = dn.trim();
       }
 
@@ -303,17 +304,21 @@ const DataIngestion = ({ onAdd, datasets, activeId, onSelect, onRemove, onRename
         const cols = splitCSVLine(line);
         const d = cols.findIndex(c => RANGE.test(String(c).trim()));
         if (d < 1 || cols.length < d + 5) { skippedRowCount++; continue; }
-        const monthIndex = parseInt(cols[d - 1], 10);
-        if (isNaN(monthIndex)) { skippedRowCount++; continue; }
-
-        // Anything left of the month index is the GA4 segment. GA4 blanks
-        // repeated group values, so carry the last seen segment forward.
+        // Real GA4 exports put the Segment column BETWEEN the month index and
+        // the date range; some variants put it first. Whichever cell left of
+        // the range parses as an integer is the month index; the other left
+        // cell (if any) is the segment.
+        let monthIndex = parseInt(cols[d - 1], 10);
         let segment = '';
-        if (d >= 2) {
-          segment = (cols[d - 2] || '').trim();
-          if (segment) lastSegment = segment;
-          else segment = lastSegment;
+        if (!isNaN(monthIndex)) {
+          if (d >= 2) segment = (cols[d - 2] || '').trim();
+        } else if (d >= 2) {
+          monthIndex = parseInt(cols[d - 2], 10);
+          segment = (cols[d - 1] || '').trim();
         }
+        if (isNaN(monthIndex)) { skippedRowCount++; continue; }
+        if (segment) lastSegment = segment;
+        else segment = lastSegment;
 
         const [startRaw, endRaw] = String(cols[d]).trim().split('-').map(s => s.trim());
         const startDate = formatDate(startRaw);
@@ -324,6 +329,12 @@ const DataIngestion = ({ onAdd, datasets, activeId, onSelect, onRemove, onRename
         let path = (cols[d + 1] || '').trim();
         if (path === '' || path === 'All Users') path = 'RESERVED_TOTAL';
 
+        // GA4 duplicates every row across comparison series: date_range_N
+        // (per date range) and RESERVED_TOTAL (the totals — the cohort's
+        // full user count). The column is unnamed in the header.
+        const seriesCell = String(cols[d + 2] || '').trim();
+        const series = /^(RESERVED_TOTAL|date_range_\d+)$/.test(seriesCell) ? seriesCell : null;
+
         const visitors = safeInt(cols[d + 3]);
         const purchases = safeInt(cols[d + 4]);
         const rawRate = cols[d + 5];
@@ -333,11 +344,34 @@ const DataIngestion = ({ onAdd, datasets, activeId, onSelect, onRemove, onRename
           if (!isNaN(f)) percentage = (f * 100).toFixed(2) + '%';
         }
 
-        rows.push({ segment, monthIndex, startDate, endDate, path, visitors, purchases, percentage });
+        rows.push({ segment, series, monthIndex, startDate, endDate, path, visitors, purchases, percentage });
       }
 
       if (!rows.length) {
         setError('No cohort rows found. Ensure this is a GA4 Cohort exploration export (Technique: Cohort exploration).');
+        setIsProcessing(false);
+        return;
+      }
+
+      // Keep exactly ONE comparison series — totals when present — otherwise
+      // every data point is ingested twice and visitors become order-dependent.
+      const tagged = rows.filter(r => r.series);
+      let kept = rows;
+      if (tagged.length) {
+        const prefer = tagged.some(r => r.series === 'RESERVED_TOTAL') ? 'RESERVED_TOTAL' : 'date_range_0';
+        kept = rows.filter(r => !r.series || r.series === prefer);
+      }
+      // Collapse residual exact duplicates and clip any rows beyond a
+      // cohort's true age (defensive against padded export variants).
+      const dataEndYM = kept.reduce((m, r) => (r.endDate > m ? r.endDate : m), kept[0].endDate).slice(0, 7);
+      const dedup = new Map();
+      kept.forEach(r => {
+        if (r.monthIndex > monthDiff(r.startDate.slice(0, 7), dataEndYM)) return;
+        dedup.set(`${r.segment}|${r.startDate}|${r.path}|${r.monthIndex}`, r);
+      });
+      const cleanRows = Array.from(dedup.values());
+      if (!cleanRows.length) {
+        setError('No cohort rows survived cleaning \u2014 this export layout looks unusual.');
         setIsProcessing(false);
         return;
       }
@@ -384,7 +418,7 @@ const DataIngestion = ({ onAdd, datasets, activeId, onSelect, onRemove, onRename
         };
       };
 
-      const segNames = Array.from(new Set(rows.map(r => r.segment).filter(Boolean)));
+      const segNames = Array.from(new Set(cleanRows.map(r => r.segment).filter(Boolean)));
       setError(null);
 
       if (segNames.length > 1) {
@@ -392,15 +426,20 @@ const DataIngestion = ({ onAdd, datasets, activeId, onSelect, onRemove, onRename
         // never sum segments together (that double-counts All Users overlap).
         // Stay on this tab so the split result and notice are visible.
         segNames.forEach(sn => {
-          const ds = buildDataset(rows.filter(r => r.segment === sn));
+          const ds = buildDataset(cleanRows.filter(r => r.segment === sn));
           onAdd(ds.csv, ds.stats, `${sn} \u2014 ${baseName}`, { stay: true });
         });
         setNotice(`Detected ${segNames.length} GA4 segments \u2014 split into ${segNames.length} datasets: ${segNames.join(', ')}.`);
+      } else if (segNames.length === 1) {
+        // Single-segment export (one file per segment is a common workflow):
+        // stay on this tab so the tag notice is visible and the next file is
+        // one click away.
+        const ds = buildDataset(cleanRows);
+        onAdd(ds.csv, ds.stats, `${segNames[0]} \u2014 ${baseName}`, { stay: true });
+        setNotice(`GA4 segment "${segNames[0]}" detected \u2014 tagged in the dataset name. Upload the next segment export whenever you're ready.`);
       } else {
-        const ds = buildDataset(rows);
-        const name = segNames.length === 1 ? `${segNames[0]} \u2014 ${baseName}` : baseName;
-        onAdd(ds.csv, ds.stats, name);
-        if (segNames.length === 1) setNotice(`GA4 segment "${segNames[0]}" detected \u2014 tagged in the dataset name.`);
+        const ds = buildDataset(cleanRows);
+        onAdd(ds.csv, ds.stats, baseName);
       }
       setIsProcessing(false);
 
