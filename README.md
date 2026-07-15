@@ -7,8 +7,6 @@ Built with **React**, **Vite**, and **Tailwind CSS**, this tool processes raw CS
 ## Live App
 
 
-https://cohortsuite.netlify.app/
-
 https://cohortsuite-v9.netlify.app/
 
 
